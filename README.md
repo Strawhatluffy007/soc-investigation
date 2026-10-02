@@ -109,6 +109,7 @@ To teach the engine a new event type, add an entry to `app/investigation/playboo
 - [docs/followups.md](docs/followups.md): follow-up logs and questions after the first analysis
 - [docs/llm.md](docs/llm.md): LLM providers (login, API key, local), the external-LLM switches, and what data is sent
 - [docs/adding-an-llm.md](docs/adding-an-llm.md): how to add another LLM provider
+- [CHANGELOG.md](CHANGELOG.md): notable changes by date
 
 ## Security notes
 
