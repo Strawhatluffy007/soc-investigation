@@ -1,0 +1,45 @@
+name: soc-investigation
+
+services:
+  soc:
+    build: .
+    image: soc-investigation:local
+    container_name: soc-investigation
+    restart: unless-stopped
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      TZ: ${TZ:-Asia/Kolkata}
+    ports:
+      # Localhost only by default. To expose on the LAN set SOC_BIND_ADDR
+      # (e.g. 0.0.0.0) AND SOC_AUTH_PASSWORD, or the app refuses to start.
+      - "${SOC_BIND_ADDR:-127.0.0.1}:${SOC_PORT:-8090}:8090"
+    volumes:
+      - ./customers:/app/customers
+      - ./data:/app/data
+      - ./catalog:/app/catalog
+    extra_hosts:
+      # The soc network gateway, where bridge/claude_bridge.py listens
+      - "host.docker.internal:172.30.90.1"
+    networks: [soc]
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m
+    security_opt:
+      - no-new-privileges:true
+    cap_drop: [ALL]
+    user: "${SOC_UID:-1000}:${SOC_GID:-1000}"
+    mem_limit: 512m
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "3" }
+
+networks:
+  soc:
+    ipam:
+      config:
+        # Fixed subnet so the Claude CLI bridge can bind to the gateway IP
+        # (172.30.90.1) instead of every host interface.
+        - subnet: 172.30.90.0/24
+          gateway: 172.30.90.1

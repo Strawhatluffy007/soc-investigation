@@ -1,0 +1,18 @@
+# User unit: ~/.config/systemd/user/claude-bridge.service
+#   systemctl --user daemon-reload && systemctl --user enable --now claude-bridge
+#   (loginctl enable-linger $USER so it runs without a login session)
+[Unit]
+Description=SOC Investigation - Claude Code CLI bridge
+After=network-online.target
+
+[Service]
+EnvironmentFile=%h/claude/soc-investigation/.env.bridge
+Environment=CLAUDE_BIN=%h/.local/bin/claude
+ExecStart=/usr/bin/python3 %h/claude/soc-investigation/bridge/claude_bridge.py
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=default.target

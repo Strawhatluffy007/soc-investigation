@@ -1,0 +1,1 @@
+{"Timestamp":"2026-09-30T22:05:40Z","AccountUpn":"lchen@fabrikam.com","AccountDisplayName":"Li Chen","IPAddress":"45.142.120.9","Country":"NL","City":"Amsterdam","Application":"Office 365 Exchange Online","ErrorCode":0,"LogonType":"[\"interactiveUser\"]","ClientAppUsed":"Browser","ConditionalAccessStatus":0,"RiskLevelDuringSignIn":50,"UserAgent":"python-requests/2.31"}

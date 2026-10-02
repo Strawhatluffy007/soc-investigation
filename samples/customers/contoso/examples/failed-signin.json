@@ -1,0 +1,16 @@
+{
+  "TimeGenerated": "2026-09-30T03:14:22.512Z",
+  "UserPrincipalName": "adm-jsmith@contoso.com",
+  "UserDisplayName": "John Smith (Admin)",
+  "IPAddress": "185.220.101.47",
+  "Location": "DE",
+  "AppDisplayName": "Azure Portal",
+  "ClientAppUsed": "Browser",
+  "ResultType": "50126",
+  "ResultDescription": "Error validating credentials due to invalid username or password.",
+  "ConditionalAccessStatus": "notApplied",
+  "AuthenticationRequirement": "singleFactorAuthentication",
+  "UserAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
+  "RiskLevelDuringSignIn": "medium",
+  "CorrelationId": "7b1c2e1a-1f0d-4f43-9d6e-2a5f3d8c9e10"
+}

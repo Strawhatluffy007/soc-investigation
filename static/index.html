@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SOC Investigation</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<header class="topbar">
+  <div class="brand"><span class="logo">◆</span> SOC Investigation</div>
+  <label class="cust-pick">Customer
+    <select id="customerSelect"><option value="">Select customer…</option></select>
+  </label>
+  <div id="llmBadge" class="badge"></div>
+  <div class="spacer"></div>
+  <label class="analyst">Analyst <input id="analystName" maxlength="60" placeholder="your name"></label>
+</header>
+<div id="banner" class="banner hidden"></div>
+<div class="layout">
+  <aside class="sidebar">
+    <div class="side-actions">
+      <button id="btnNew" class="primary" disabled>+ New investigation</button>
+      <button id="btnConfig" disabled>Customer config</button>
+      <button id="btnNewCustomer" class="ghost">+ Customer</button>
+      <button id="btnCatalog" class="ghost">Schema catalog</button>
+    </div>
+    <div class="side-filter">
+      <input id="invSearch" placeholder="Filter investigations">
+      <select id="invStatus"><option value="">All statuses</option></select>
+    </div>
+    <ul id="invList" class="inv-list"></ul>
+  </aside>
+  <main id="main" class="main"></main>
+</div>
+<div id="toast" class="toast hidden"></div>
+<script src="/static/app.js"></script>
+</body>
+</html>

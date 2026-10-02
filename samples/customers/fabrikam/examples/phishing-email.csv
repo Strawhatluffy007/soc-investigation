@@ -1,0 +1,2 @@
+Timestamp,NetworkMessageId,SenderFromAddress,SenderIPv4,RecipientEmailAddress,Subject,DeliveryAction,ThreatTypes,UrlCount
+2026-09-28T09:41:03Z,0f3e5c1a-8b2d-4c7e-9a10-5d6e7f8a9b0c,payroll@fabrikam-hr-portal.com,203.0.113.77,akumar@fabrikam.com,"Action required: confirm your salary details",Delivered,Phish,1

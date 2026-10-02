@@ -1,0 +1,5 @@
+# app/observables/
+
+| File | Purpose |
+|---|---|
+| `extract.py` | Deterministic extraction of IPs (tagged internal/external), domains, URLs, emails, hashes, users, hosts, processes and more. Handles defanged indicators and uses field names as hints. |

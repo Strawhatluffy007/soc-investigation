@@ -1,0 +1,11 @@
+.venv
+.env
+.env.bridge
+data
+customers
+tests
+docs
+bridge
+.git
+**/__pycache__
+.pytest_cache

@@ -1,0 +1,16 @@
+.env
+.env.bridge
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+data/*
+!data/.gitkeep
+!data/README.md
+
+# Real customer data stays on this machine. Only the blank template is tracked;
+# sample customers live in samples/customers/.
+customers/*
+!customers/_template/
+!customers/README.md
+catalog/*.bak*
