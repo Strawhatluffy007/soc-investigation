@@ -15,8 +15,11 @@ from app.security import INV_ID_RE, InputError, valid_slug
 
 STATUSES = ["New", "Investigating", "Pending Information", "Escalated", "Resolved", "Closed"]
 SEVERITIES = ["", "Informational", "Low", "Medium", "High", "Critical"]
-EDITABLE = {"title", "status", "severity", "findings", "analyst_notes", "context", "ticket", "assigned_to"}
+EDITABLE = {"title", "status", "severity", "findings", "analyst_notes", "context", "ticket", "assigned_to",
+            "risk", "soc_actions", "client_actions"}
 MAX_TEXT = 200_000
+MAX_FOLLOWUPS = 100
+FOLLOWUP_KINDS = ("log", "note")
 
 
 def _now() -> str:
@@ -142,6 +145,43 @@ class InvestigationStore:
         self._write(inv)
         return inv
 
+    def add_followup(self, customer_id: str, inv_id: str, *, kind: str, text: str, analyst: str,
+                     source_name: str = "", max_log_chars: int = 2_000_000) -> dict:
+        """Append analyst input given after the first analysis: more logs
+        (Defender, raw) or a general note/question. Logs count towards the
+        same size cap as the original log."""
+        if kind not in FOLLOWUP_KINDS:
+            raise InputError("Follow-up kind must be 'log' or 'note'.")
+        if not text.strip():
+            raise InputError("Follow-up input is empty.")
+        inv = self.get(customer_id, inv_id)
+        fus = inv.setdefault("followups", [])
+        if len(fus) >= MAX_FOLLOWUPS:
+            raise InputError(f"An investigation can hold at most {MAX_FOLLOWUPS} follow-ups.")
+        if kind == "log" and len(combined_log(inv)) + len(text) > max_log_chars:
+            raise InputError(f"Combined log would exceed {max_log_chars:,} characters.")
+        fus.append({"id": f"F{len(fus) + 1}", "at": _now(), "by": analyst, "kind": kind,
+                    "source_name": source_name[:200], "text": text[:MAX_TEXT], "chars": len(text)})
+        self._event(inv, analyst, "follow-up added",
+                    ("log" + (f" ({source_name})" if source_name else "")) if kind == "log" else "note")
+        if inv["status"] in ("Resolved", "Closed"):
+            self._event(inv, analyst, "status changed", f"{inv['status']} → Investigating")
+            inv["status"] = "Investigating"
+        inv["updated"] = _now()
+        self._write(inv)
+        return inv
+
+    def set_followup_output(self, customer_id: str, inv_id: str, fid: str, output: dict) -> dict:
+        """Attach what a follow-up produced (answer, new findings, ticket) so the
+        timeline shows each input with its own result."""
+        inv = self.get(customer_id, inv_id)
+        for f in inv.get("followups") or []:
+            if f["id"] == fid:
+                f["output"] = output | {"at": _now()}
+                self._write(inv)
+                break
+        return inv
+
     def save_ticket(self, customer_id: str, inv_id: str, ticket: str, analyst: str) -> dict:
         inv = self.get(customer_id, inv_id)
         inv["ticket"] = ticket
@@ -154,3 +194,22 @@ class InvestigationStore:
     def _event(inv: dict, analyst: str, action: str, detail: str = "") -> None:
         inv.setdefault("history", []).append({"at": _now(), "by": analyst, "action": action, "detail": detail})
         inv["history"] = inv["history"][-200:]
+
+
+def followup_logs(inv: dict) -> list[dict]:
+    return [f for f in inv.get("followups") or [] if f.get("kind") == "log"]
+
+
+def combined_log(inv: dict) -> str:
+    """Original log followed by every follow-up log, each under a separator."""
+    parts = [inv.get("raw_log", "")]
+    for f in followup_logs(inv):
+        parts.append(f"# --- Additional log {f['id']}" + (f" ({f['source_name']})" if f.get("source_name") else "")
+                     + f", added {f['at']} ---\n{f['text']}")
+    return "\n\n".join(parts)
+
+
+def followup_notes(inv: dict) -> str:
+    """Analyst follow-up notes/questions, oldest first, for the LLM context."""
+    return "\n\n".join(f"[{f['id']} {f['at']} by {f['by']}]\n{f['text']}"
+                         for f in inv.get("followups") or [] if f.get("kind") == "note")

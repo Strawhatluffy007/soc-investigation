@@ -1,43 +1,80 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" data-theme="dark">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark light">
 <title>SOC Investigation</title>
+<script src="/static/theme.js"></script>
 <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
 <header class="topbar">
-  <div class="brand"><span class="logo">◆</span> SOC Investigation</div>
-  <label class="cust-pick">Customer
-    <select id="customerSelect"><option value="">Select customer…</option></select>
+  <button id="btnMenu" class="icon-btn menu-btn" title="Menu" aria-label="Toggle sidebar">
+    <svg viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h16"/></svg>
+  </button>
+  <div class="brand">
+    <span class="logo"><svg viewBox="0 0 24 24"><path d="M12 2 4 5v6c0 5 3.4 9.4 8 11 4.6-1.6 8-6 8-11V5l-8-3z"/><path d="m9 12 2 2 4-4"/></svg></span>
+    <span class="brand-text">SOC <b>Investigation</b></span>
+  </div>
+  <label class="cust-pick" title="Customer">
+    <svg viewBox="0 0 24 24" class="i"><path d="M3 21h18M5 21V7l7-4 7 4v14M9 21v-6h6v6"/></svg>
+    <select id="customerSelect" aria-label="Customer"><option value="">Select customer…</option></select>
   </label>
   <div id="llmBadge" class="badge"></div>
   <label id="extSwitch" class="switch hidden" title="Turn sending data to the external LLM on or off for everyone">
-    <input type="checkbox" id="extToggle"><span class="slider"></span> External LLM
+    <input type="checkbox" id="extToggle"><span class="slider"></span> <span class="switch-text">External LLM</span>
   </label>
   <div class="spacer"></div>
-  <label class="analyst">Analyst <input id="analystName" maxlength="60" placeholder="your name"></label>
+  <label class="analyst" title="Your name for the audit log">
+    <svg viewBox="0 0 24 24" class="i"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 4-6 8-6s8 2 8 6"/></svg>
+    <input id="analystName" maxlength="60" placeholder="Analyst name" aria-label="Analyst name">
+  </label>
+  <button id="btnTheme" class="icon-btn" title="Switch light / dark mode" aria-label="Switch light or dark mode">
+    <svg viewBox="0 0 24 24" class="sun"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>
+    <svg viewBox="0 0 24 24" class="moon"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg>
+  </button>
 </header>
 <div id="banner" class="banner hidden"></div>
 <div class="layout">
-  <aside class="sidebar">
+  <aside class="sidebar" id="sidebar">
     <div class="side-actions">
-      <button id="btnNew" class="primary" disabled>+ New investigation</button>
-      <button id="btnConfig" disabled>Customer config</button>
-      <button id="btnNewCustomer" class="ghost">+ Customer</button>
-      <button id="btnCatalog" class="ghost">Schema catalog</button>
-      <button id="btnLLM" class="ghost">LLM settings</button>
+      <button id="btnNew" class="primary block" disabled title="New investigation (N)">
+        <svg viewBox="0 0 24 24" class="i"><path d="M12 5v14M5 12h14"/></svg> New investigation
+      </button>
+      <nav class="side-nav">
+        <button id="btnConfig" class="nav-item" disabled>
+          <svg viewBox="0 0 24 24" class="i"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>
+          Customer config</button>
+        <button id="btnTemplate" class="nav-item" disabled>
+          <svg viewBox="0 0 24 24" class="i"><path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><path d="M14 3v6h6M8 13h8M8 17h5"/></svg>
+          Ticket template</button>
+        <button id="btnCatalog" class="nav-item">
+          <svg viewBox="0 0 24 24" class="i"><ellipse cx="12" cy="5" rx="8" ry="3"/><path d="M4 5v14c0 1.7 3.6 3 8 3s8-1.3 8-3V5M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3"/></svg>
+          Schema catalog</button>
+        <button id="btnLLM" class="nav-item">
+          <svg viewBox="0 0 24 24" class="i"><path d="M12 3l1.9 5.8L20 10l-6.1 1.2L12 17l-1.9-5.8L4 10l6.1-1.2z"/><path d="M19 16l.8 2.2L22 19l-2.2.8L19 22l-.8-2.2L16 19l2.2-.8z"/></svg>
+          LLM settings</button>
+        <button id="btnNewCustomer" class="nav-item">
+          <svg viewBox="0 0 24 24" class="i"><path d="M3 21h18M5 21V7l7-4 7 4v14"/><path d="M12 10v6M9 13h6"/></svg>
+          Add customer</button>
+      </nav>
     </div>
+    <div class="side-head">Investigations <span id="invCount" class="count"></span></div>
     <div class="side-filter">
-      <input id="invSearch" placeholder="Filter investigations">
-      <select id="invStatus"><option value="">All statuses</option></select>
+      <div class="search">
+        <svg viewBox="0 0 24 24" class="i"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+        <input id="invSearch" placeholder="Filter…  ( / )" aria-label="Filter investigations">
+      </div>
+      <select id="invStatus" aria-label="Status"><option value="">All</option></select>
     </div>
     <ul id="invList" class="inv-list"></ul>
+    <div class="side-foot muted small">Shortcuts: <kbd>N</kbd> new · <kbd>/</kbd> search · <kbd>T</kbd> theme</div>
   </aside>
+  <div id="scrim" class="scrim"></div>
   <main id="main" class="main"></main>
 </div>
-<div id="toast" class="toast hidden"></div>
+<div id="toast" class="toast hidden" role="status"></div>
 <script src="/static/app.js"></script>
 </body>
 </html>

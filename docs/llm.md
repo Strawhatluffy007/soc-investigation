@@ -44,10 +44,12 @@ The UI header shows whether an external LLM is available. Each investigation rec
 ### What is sent
 
 - The raw log, secret-scrubbed and truncated to `LLM_MAX_LOG_CHARS`.
-- The analyst context.
+- The analyst context, and any follow-up logs and notes added to the investigation (same redaction and size limit).
 - That customer's `customer.md`, truncated to `LLM_MAX_CONTEXT_CHARS`.
 - That customer's table list.
 - The rules engine's classification and observables.
+
+The LLM also returns a ticket draft (description, outcome, why, client actions). This draft is used in the ticket only where the analyst has not written their own text, and it is labelled there as an LLM draft.
 
 No other customer's data is ever included. The log goes inside `<untrusted_log>` tags, and the system prompt says to treat it as data, not instructions.
 

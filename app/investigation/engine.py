@@ -53,6 +53,16 @@ def event_time(parsed: ParsedLog, text: str) -> tuple[datetime | None, str]:
     return dt, (raw or "")
 
 
+def _facts(parsed: ParsedLog, into: dict[str, list[str]]) -> dict[str, list[str]]:
+    """Labelled key fields (User, Device, Application…) used by ticket
+    placeholders such as {{who}} and {{where}}."""
+    for label, keys in FACT_KEYS:
+        v = parsed.get(*keys)
+        if v and len(v) < 400 and v not in into.setdefault(label, []):
+            into[label].append(v)
+    return {k: v for k, v in into.items() if v}
+
+
 def _observed(parsed: ParsedLog, observables: list[dict], ts_raw: str) -> list[str]:
     out = [f"Log format: {parsed.format}" + (f", {parsed.records} records" if parsed.records > 1 else "")]
     if ts_raw:
@@ -92,11 +102,27 @@ def _dedupe(items: list[str]) -> list[str]:
 
 
 def analyze(profile: CustomerProfile, raw_log: str, context: str = "", provider: LLMProvider | None = None,
-            llm_max_log_chars: int = 60_000, llm_max_context_chars: int = 120_000) -> dict:
+            llm_max_log_chars: int = 60_000, llm_max_context_chars: int = 120_000,
+            extra_logs: list[dict] | None = None, notes: str = "") -> dict:
+    """`extra_logs` are follow-up logs ({id, source_name, at, text}) added after
+    the first analysis; `notes` is the analyst's follow-up input. Each extra
+    log is parsed on its own (it may be a different format) and its
+    observables are merged with the original's."""
+    extra_logs = extra_logs or []
     parsed = parse_log(raw_log)
-    event_types = classify(raw_log, parsed, context)
+    all_text = "\n".join([raw_log] + [f["text"] for f in extra_logs])
+    event_types = classify(all_text, parsed, "\n".join(x for x in (context, notes) if x))
     mapping = map_tables(profile, parsed, event_types)
     observables = extract_observables(raw_log, parsed.fields)
+    seen = {(o["type"], o["value"].lower()) for o in observables}
+    facts = _facts(parsed, {})
+    for f in extra_logs:
+        p = parse_log(f["text"])
+        facts = _facts(p, facts)
+        for o in extract_observables(f["text"], p.fields):
+            if (o["type"], o["value"].lower()) not in seen:
+                seen.add((o["type"], o["value"].lower()))
+                observables.append(o | {"sources": [f"follow-up {f['id']}"] + o["sources"][:4]})
     ts, ts_raw = event_time(parsed, raw_log)
 
     tables = [m["table"] for m in mapping]
@@ -115,7 +141,8 @@ def analyze(profile: CustomerProfile, raw_log: str, context: str = "", provider:
 
     result = {
         "analyzed_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
-        "parsed": {"format": parsed.format, "records": parsed.records, "field_count": len(parsed.fields)},
+        "parsed": {"format": parsed.format, "records": parsed.records, "field_count": len(parsed.fields),
+                   "followup_logs": len(extra_logs)},
         "event_time": ts.isoformat() if ts else None,
         "event_types": event_types,
         "summary": (primary_pb["label"] + ("" if primary_pb["label"].lower().endswith("event") else " event")
@@ -130,13 +157,15 @@ def analyze(profile: CustomerProfile, raw_log: str, context: str = "", provider:
         "recommended_steps": _dedupe(primary_pb["steps"] + customer_steps),
         "mapping": {"tables": mapping},
         "observables": observables,
+        "facts": facts,
         "engine": {"mode": "rules", "provider": "none", "external": False, "model": "", "error": ""},
     }
 
     if provider is not None:
         result["engine"].update(provider.describe())
         try:
-            prompt = build_prompt(profile, raw_log, context, result, llm_max_log_chars, llm_max_context_chars)
+            prompt = build_prompt(profile, raw_log, context, result, llm_max_log_chars, llm_max_context_chars,
+                                  extra_logs, notes)
             llm = provider.analyze(SYSTEM_PROMPT, prompt, ANALYSIS_SCHEMA)
             _merge_llm(result, llm)
             result["engine"]["mode"] = "rules+llm"
@@ -176,3 +205,10 @@ def _merge_llm(result: dict, llm: dict) -> None:
             "time_range": "as written in the query", "source": "llm",
         })
     result["recommended_steps"] = _dedupe(_strs(llm.get("recommended_steps")) + result["recommended_steps"])
+    if str(llm.get("analyst_response") or "").strip():
+        result["analyst_response"] = str(llm["analyst_response"]).strip()[:20_000]
+    t = llm.get("ticket") if isinstance(llm.get("ticket"), dict) else {}
+    draft = {k: str(t.get(k) or "").strip()[:4000] for k in ("description", "outcome", "why")}
+    draft["client_actions"] = _strs(t.get("client_actions"))[:12]
+    if any(draft.values()):
+        result["ticket_draft"] = draft

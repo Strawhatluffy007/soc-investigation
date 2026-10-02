@@ -45,9 +45,13 @@ To run the tests: `.venv/bin/python -m pytest -q`
    - Each card shows the purpose, time range, why those fields were used, and the expected result.
    - A local validation badge shows on every card. Edit the query and re-validate, or use the scratchpad.
    - Queries are **never executed** by this app.
-5. **Findings & notes:** record what your queries actually showed.
-6. **Ticket:** fill the customer template, then edit, copy or download it.
-7. **Status:** New → Investigating → Pending Information → Escalated → Resolved → Closed. Changes are recorded in History.
+5. **Follow-up:** keep adding to the investigation after the first analysis.
+   - **More logs** (Defender alert/evidence JSON, hunting results, raw logs; paste or upload). Each one is parsed on its own and its observables are merged with the original's.
+   - **Question / general input**, e.g. "user confirmed travel" or "create a ticket for this incident". With an LLM, the answer appears on the Summary tab. A note that asks for a ticket generates one.
+   - Optionally re-analyse with everything so far. Adding input reopens a Resolved/Closed investigation. The audit log records only the kind and size of the input, never its text.
+6. **Findings & notes:** record the outcome, why / risk, action taken by SOC and action for the client. After an LLM analysis, the LLM's draft of each is shown under its box and used in the ticket until you write your own.
+7. **Ticket:** fill the customer template, then edit, copy or download it. When / Who / Where come from the logs; Description, Outcome, Why and client actions come from you or, failing that, the LLM's draft, labelled for review. The **SOC standard** starter template follows the Subject / Description / When / Who / Where / Why / Actions format. **Ticket template** in the sidebar (or **Edit template** on the Ticket tab) opens an editor with a placeholder list (click to insert), a live preview against any of the customer's investigations, and a check for unknown placeholders. Saving creates a template for that customer only; **Revert to default** removes it.
+8. **Status:** New → Investigating → Pending Information → Escalated → Resolved → Closed. Changes are recorded in History.
 
 **Schema catalog:** in the sidebar, **Schema catalog** → **Pull from Microsoft** builds `catalog/schema-catalog.md` from the official Sentinel and Defender XDR table references. Then go to **Customer config** → **Schema selection**, tick the tables the customer has, and click **Apply**. That customer's analysis then uses only those tables. See [docs/customers.md](docs/customers.md).
 
@@ -101,7 +105,8 @@ To teach the engine a new event type, add an entry to `app/investigation/playboo
 ## Docs
 
 - [docs/customers.md](docs/customers.md): adding customers, schema format, field roles, KQL validation
-- [docs/tickets.md](docs/tickets.md): ticket templates and placeholders
+- [docs/tickets.md](docs/tickets.md): ticket templates, the template editor, the SOC standard template, placeholders
+- [docs/followups.md](docs/followups.md): follow-up logs and questions after the first analysis
 - [docs/llm.md](docs/llm.md): LLM providers (login, API key, local), the external-LLM switches, and what data is sent
 - [docs/adding-an-llm.md](docs/adding-an-llm.md): how to add another LLM provider
 

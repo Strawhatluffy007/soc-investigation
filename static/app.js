@@ -10,6 +10,7 @@ function h(tag, attrs, ...kids) {
   for (const [k, v] of Object.entries(attrs || {})) {
     if (v === null || v === undefined || v === false) continue;
     if (k === "class") el.className = v;
+    else if (k === "style") el.style.cssText = v;  // CSSOM is allowed by the CSP; style="" attributes are not
     else if (k.startsWith("on")) el.addEventListener(k.slice(2), v);
     else if (k === "value") el.value = v;
     else if (k === "checked" || k === "disabled" || k === "selected") el[k] = !!v;
@@ -26,6 +27,7 @@ function toast(msg, kind = "") {
   const t = $("toast");
   t.textContent = msg;
   t.className = "toast " + kind;
+  t.onclick = () => t.classList.add("hidden");
   clearTimeout(toast.timer);
   toast.timer = setTimeout(() => t.classList.add("hidden"), kind === "error" ? 7000 : 3000);
 }
@@ -78,12 +80,19 @@ async function boot() {
   $("customerSelect").addEventListener("change", (e) => selectCustomer(e.target.value));
   $("btnNew").addEventListener("click", showNewForm);
   $("btnConfig").addEventListener("click", () => showConfig());
+  $("btnTemplate").addEventListener("click", () => showTemplateEditor());
   $("btnNewCustomer").addEventListener("click", showNewCustomer);
   $("btnCatalog").addEventListener("click", showCatalog);
   $("btnLLM").addEventListener("click", () => showLLMSettings());
   $("invSearch").addEventListener("input", renderInvList);
   $("invStatus").addEventListener("change", renderInvList);
   $("extToggle").addEventListener("change", toggleExternal);
+  $("btnTheme").addEventListener("click", toggleTheme);
+  $("btnMenu").addEventListener("click", () => document.body.classList.toggle("side-open"));
+  $("scrim").addEventListener("click", closeSidebar);
+  for (const b of document.querySelectorAll(".side-nav .nav-item, #btnNew"))
+    b.addEventListener("click", () => { setNav(b.id); closeSidebar(); });
+  document.addEventListener("keydown", shortcuts);
   try {
     S.status = await api("/status");
   } catch (e) {
@@ -102,8 +111,39 @@ async function boot() {
   }
 }
 
+// ------------------------------------------------------------------ theme, sidebar, shortcuts
+function toggleTheme() {
+  const next = document.documentElement.dataset.theme === "light" ? "dark" : "light";
+  document.documentElement.dataset.theme = next;
+  try { localStorage.setItem("theme", next); } catch (_) { /* storage blocked */ }
+}
+
+function closeSidebar() { document.body.classList.remove("side-open"); }
+
+function setNav(id) {
+  for (const b of document.querySelectorAll(".side-nav .nav-item")) b.classList.toggle("active", b.id === id);
+}
+
+function shortcuts(e) {
+  if (e.ctrlKey || e.metaKey || e.altKey) return;
+  const tag = (e.target.tagName || "").toLowerCase();
+  if (["input", "textarea", "select"].includes(tag) || e.target.isContentEditable) {
+    if (e.key === "Escape") e.target.blur();
+    return;
+  }
+  if (e.key === "/") { e.preventDefault(); document.body.classList.add("side-open"); $("invSearch").focus(); }
+  else if (e.key === "n" && !$("btnNew").disabled) { e.preventDefault(); setNav(""); showNewForm(); }
+  else if (e.key === "t") toggleTheme();
+  else if (e.key === "Escape") closeSidebar();
+}
+
+const hue = (s) => [...s].reduce((a, c) => (a * 31 + c.charCodeAt(0)) % 360, 7);
+const initials = (name) => name.split(/\s+/).filter(Boolean).slice(0, 2).map((w) => w[0].toUpperCase()).join("") || "?";
+const SEV_COLOR = { Critical: "var(--err)", High: "var(--ext)", Medium: "var(--warn)", Low: "var(--info)", Informational: "var(--faint)" };
+
 async function loadCustomers() {
   const list = await api("/customers");
+  S.customers = list;
   const sel = $("customerSelect");
   sel.replaceChildren(h("option", { value: "" }, "Select customer…"));
   for (const c of list) sel.append(h("option", { value: c.id }, c.name + (c.error ? " (config error)" : "")));
@@ -147,15 +187,38 @@ function renderLLMBadge() {
 function showWelcome() {
   S.customer = null; S.inv = null;
   renderLLMBadge();
-  $("main").replaceChildren(h("div", { class: "empty" },
-    h("h2", {}, "Select a customer to begin"),
-    h("p", {}, "Each customer has its own schema, KQL conventions and ticket template. Investigations are stored per customer and never shared across customers.")));
+  setNav("");
+  const custs = S.customers || [];
+  const pick = (id) => { $("customerSelect").value = id; selectCustomer(id); };
+  $("main").replaceChildren(h("div", { class: "page" },
+    h("section", { class: "hero" },
+      h("div", { class: "eyebrow" }, "Security operations"),
+      h("h2", {}, "Welcome back" + (localStorage.getItem("analyst") ? ", " + localStorage.getItem("analyst") : "")),
+      h("p", {}, "Paste or upload a log, get the event explained, the observables extracted, KQL to hunt with and a ticket ready to send. Everything stays per customer and local unless you choose an external LLM.")),
+    h("div", { class: "section-title" }, h("h3", {}, "Choose a customer (" + custs.length + ")"),
+      h("button", { class: "small", onclick: () => { setNav("btnNewCustomer"); showNewCustomer(); } }, "+ Add customer")),
+    custs.length ? h("div", { class: "cust-grid" }, custs.map((c, i) => h("button", {
+        class: "cust-card", style: "animation-delay:" + i * 40 + "ms", onclick: () => pick(c.id) },
+      h("div", { class: "cc-head" },
+        h("span", { class: "avatar", style: "--h:" + hue(c.id) }, initials(c.name)),
+        h("div", {}, h("div", { class: "cc-name" }, c.name), h("div", { class: "cc-id" }, c.id))),
+      h("div", { class: "cc-meta" },
+        c.error ? h("span", { class: "tag", style: "--c:var(--err)" }, "config error") : h("span", { class: "tag rules" }, (c.table_count || 0) + " tables"),
+        h("span", { class: "tag " + (c.allow_external_llm ? "external" : "internal") }, c.allow_external_llm ? "external LLM allowed" : "local only")))))
+      : h("p", { class: "muted" }, "No customers yet. Add one, or copy the samples: cp -r samples/customers/*/ customers/"),
+    h("div", { class: "section-title" }, h("h3", {}, "How it works")),
+    h("div", { class: "steps" },
+      [["Pick a customer", "Each has its own schema, KQL rules and ticket template. Data never crosses customers."],
+       ["Add a log", "Paste or upload JSON, CSV, CEF or plain text. Secrets are redacted before analysis."],
+       ["Investigate", "Review the summary, observables, hypotheses and validated KQL. Optionally ask an LLM."],
+       ["Ticket it", "Generate a ticket from the customer's template, edit it and copy it out."]]
+        .map(([b, p], i) => h("div", { class: "step" }, h("span", { class: "num" }, String(i + 1)), h("b", {}, b), h("p", {}, p))))));
 }
 
 async function selectCustomer(id) {
   S.customerId = id; S.customer = null; S.inv = null; S.investigations = [];
-  $("invList").replaceChildren();
-  $("btnNew").disabled = $("btnConfig").disabled = !id;
+  $("invList").replaceChildren(); $("invCount").textContent = "";
+  $("btnNew").disabled = $("btnConfig").disabled = $("btnTemplate").disabled = !id;
   if (!id) { localStorage.removeItem("customer"); return showWelcome(); }
   localStorage.setItem("customer", id);
   try {
@@ -177,12 +240,17 @@ function renderInvList() {
   const items = S.investigations.filter((i) => (!st || i.status === st) &&
     (!q || (i.id + " " + i.title + " " + i.event_type).toLowerCase().includes(q)));
   $("invList").replaceChildren(...items.map((i) => h("li", {
-      class: "inv-item" + (S.inv && S.inv.id === i.id ? " active" : ""), onclick: () => openInvestigation(i.id),
+      class: "inv-item" + (S.inv && S.inv.id === i.id ? " active" : ""), tabindex: "0",
+      style: "--sev:" + (SEV_COLOR[i.severity] || "transparent"),
+      onclick: () => { setNav(""); closeSidebar(); openInvestigation(i.id); },
+      onkeydown: (e) => { if (e.key === "Enter") { setNav(""); closeSidebar(); openInvestigation(i.id); } },
     },
     h("div", { class: "inv-top" }, h("span", { class: "inv-id" }, i.id), statusPill(i.status)),
     h("div", { class: "inv-title" }, i.title),
     h("div", { class: "inv-meta" }, [i.event_type, i.severity, (i.updated || "").slice(0, 16).replace("T", " ")].filter(Boolean).join(" · ")))));
-  if (!items.length) $("invList").append(h("li", { class: "muted pad" }, "No investigations yet."));
+  $("invCount").textContent = S.investigations.length ? String(S.investigations.length) : "";
+  if (!items.length) $("invList").append(h("li", { class: "muted pad small" },
+    S.investigations.length ? "No investigations match the filter." : "No investigations yet. Press N to start one."));
 }
 
 const statusPill = (s) => h("span", { class: "pill st-" + (s || "").toLowerCase().replace(/\s+/g, "-") }, s);
@@ -191,8 +259,27 @@ function showCustomerHome() {
   const c = S.customer;
   S.inv = null;
   renderInvList();
+  setNav("");
+  const invs = S.investigations || [];
+  const open = invs.filter((i) => !["Resolved", "Closed"].includes(i.status));
+  const hot = invs.filter((i) => ["Critical", "High"].includes(i.severity) && !["Resolved", "Closed"].includes(i.status));
+  const recent = [...invs].sort((a, b) => (b.updated || "").localeCompare(a.updated || "")).slice(0, 6);
+  const stat = (v, l, color) => h("div", { class: "stat", style: "--c:" + color }, h("div", { class: "v" }, String(v)), h("div", { class: "l" }, l));
   $("main").replaceChildren(h("div", { class: "page" },
-    h("h2", {}, c.name),
+    h("div", { class: "page-head" },
+      h("span", { class: "avatar", style: "--h:" + hue(c.id) }, initials(c.name)),
+      h("div", {}, h("h2", {}, c.name), h("div", { class: "muted small mono" }, c.id)),
+      h("div", { class: "spacer" }),
+      h("button", { onclick: () => { setNav("btnConfig"); showConfig(); } }, "Configure"),
+      h("button", { class: "primary", onclick: showNewForm }, "+ New investigation")),
+    h("div", { class: "stats" },
+      stat(open.length, "Open investigations", "var(--accent)"),
+      stat(hot.length, "Open high / critical", hot.length ? "var(--err)" : "var(--ok)"),
+      stat(invs.length, "Total investigations", "var(--info)"),
+      stat(c.tables.length, "Tables in schema", "var(--accent-2)")),
+    recent.length ? card("Recent investigations", h("ul", { class: "recent" }, recent.map((i) => h("li", { onclick: () => openInvestigation(i.id) },
+      h("span", { class: "inv-id" }, i.id), h("span", { class: "t" }, i.title), i.severity ? h("span", { class: "tag", style: "--c:" + (SEV_COLOR[i.severity] || "var(--muted)") }, i.severity) : null,
+      statusPill(i.status))))) : null,
     h("div", { class: "grid2" },
       card("Environment", c.environment.length ? h("ul", {}, c.environment.map((e) => h("li", {}, e))) : h("p", { class: "muted" }, "Not documented.")),
       card("Settings", h("dl", { class: "kv" }, Object.entries(c.settings).flatMap(([k, v]) => [h("dt", {}, k), h("dd", {}, v)])))),
@@ -201,7 +288,7 @@ function showCustomerHome() {
       h("tbody", {}, c.tables.map((t) => h("tr", {}, h("td", { class: "mono" }, t.name), h("td", {}, t.product),
         h("td", { class: "mono" }, t.roles.time || "—"), h("td", {}, String(t.fields.length)), h("td", { class: "muted" }, t.source)))))),
     c.investigation_notes ? card("Investigation notes", h("pre", { class: "md" }, c.investigation_notes)) : null,
-    h("div", { class: "row" }, h("button", { class: "primary", onclick: showNewForm }, "+ New investigation"))));
+    null));
 }
 
 function card(title, ...body) {
@@ -245,7 +332,7 @@ function llmChoice(prefix) {
   rules.addEventListener("change", sync);
   withLLM.addEventListener("change", sync);
   const blocked = llm.blocked_by === "customer" || choices.some((c) => c.blocked_by === "customer");
-  wrap.append(
+  wrap.append(...[
     h("label", { class: "inline" }, rules, " Local rules engine (no data leaves this system)"),
     h("div", { class: "row" },
       h("label", { class: "inline" + (pickable.length ? "" : " disabled") }, withLLM, " Rules + LLM:"),
@@ -253,7 +340,7 @@ function llmChoice(prefix) {
       h("button", { class: "small ghost", onclick: () => showLLMSettings() }, "LLM settings")),
     pickable.length ? null : h("div", { class: "muted small" }, llm.reason || "No LLM is ready. Set one up in LLM settings."),
     blocked ? allowCustomerButton() : null,
-    warn);
+    warn].filter(Boolean));
   sync();
   return { el: wrap, get: () => ({ use_llm: withLLM.checked, confirm_external: confirm.checked,
     llm_provider: withLLM.checked ? pick.value : "", external: withLLM.checked && !!cur().external }) };
@@ -330,7 +417,7 @@ async function openInvestigation(id) {
   } catch (e) { toast(e.message, "error"); }
 }
 
-const TABS = [["summary", "Summary"], ["observables", "Observables"], ["hypotheses", "Hypotheses"], ["kql", "KQL"],
+const TABS = [["summary", "Summary"], ["followup", "Follow-up"], ["observables", "Observables"], ["hypotheses", "Hypotheses"], ["kql", "KQL"],
   ["findings", "Findings & notes"], ["ticket", "Ticket"], ["raw", "Raw log"], ["history", "History"]];
 
 function showInvestigation(inv) {
@@ -356,7 +443,8 @@ function showInvestigation(inv) {
       " · ", (a.analyzed_at || "").replace("T", " ")) : null);
   const tabs = h("nav", { class: "tabs" }, TABS.map(([k, label]) => h("button", {
     class: "tab" + (S.tab === k ? " active" : ""), onclick: () => { S.tab = k; showInvestigation(S.inv); } },
-    label + (k === "kql" && a ? ` (${a.kql_queries.length})` : "") + (k === "observables" && a ? ` (${a.observables.length})` : ""))));
+    label + (k === "followup" && (inv.followups || []).length ? ` (${inv.followups.length})` : "")
+      + (k === "kql" && a ? ` (${a.kql_queries.length})` : "") + (k === "observables" && a ? ` (${a.observables.length})` : ""))));
   const body = h("div", { class: "tab-body" }, renderTab(S.tab, inv));
   $("main").replaceChildren(h("div", { class: "page ws" }, head, tabs, body));
 }
@@ -377,11 +465,17 @@ function list(items, empty = "None.") {
 
 function renderTab(tab, inv) {
   const a = inv.analysis;
-  if (!a && !["findings", "raw", "history", "ticket"].includes(tab)) {
+  if (!a && !["findings", "raw", "history", "ticket", "followup"].includes(tab)) {
     return h("div", {}, h("p", { class: "muted" }, "Not analysed yet."), reanalyseBox());
   }
   switch (tab) {
     case "summary": return h("div", {},
+      a.analyst_response ? h("section", { class: "card answer" }, h("h3", {}, h("span", { class: "tag llm" }, "LLM"),
+        " Response to your latest input"), h("div", { class: "answer-text" }, a.analyst_response)) : null,
+      h("div", { class: "continue-cta" },
+        h("div", {}, h("strong", {}, "Continue the investigation"),
+          h("div", { class: "muted small" }, "Add more Defender / Sentinel / raw logs, ask a question, or ask for a ticket.")),
+        h("button", { class: "primary", onclick: () => { S.tab = "followup"; showInvestigation(S.inv); } }, "Add input")),
       card("Event", h("p", { class: "summary" }, a.summary),
         a.llm_event_type ? h("p", {}, h("span", { class: "tag llm" }, "LLM"), " event type: " + a.llm_event_type) : null,
         h("div", { class: "types" }, a.event_types.map((e) => h("div", { class: "etype" },
@@ -407,12 +501,15 @@ function renderTab(tab, inv) {
       h("ol", { class: "hyp" }, a.hypotheses.map((x) => h("li", {}, h("strong", {}, x.title), " ",
         h("span", { class: "tag " + x.source }, x.source === "llm" ? "LLM" : "rules"), h("div", { class: "muted" }, x.rationale)))));
     case "kql": return h("div", {}, a.kql_queries.length ? a.kql_queries.map(kqlCard) : h("p", { class: "muted" }, "No queries generated."), kqlScratch());
+    case "followup": return followupTab(inv);
     case "findings": return findingsTab(inv);
     case "ticket": return ticketTab(inv);
     case "raw": return h("div", {},
       card("Analyst context", h("pre", { class: "mono raw" }, inv.context || "(none)")),
       card("Raw log" + (inv.source_name ? " · " + inv.source_name : "") + (a ? ` · ${a.parsed.format}, ${a.parsed.records} record(s)` : ""),
-        h("pre", { class: "mono raw" }, inv.raw_log)));
+        h("pre", { class: "mono raw" }, inv.raw_log)),
+      (inv.followups || []).filter((f) => f.kind === "log").map((f) => card(`Additional log ${f.id}`
+        + (f.source_name ? " · " + f.source_name : "") + " · " + fuWhen(f), h("pre", { class: "mono raw" }, f.text))));
     case "history": return card("History", h("table", { class: "tbl" }, h("tbody", {}, inv.history.slice().reverse().map((e) =>
       h("tr", {}, h("td", { class: "mono small" }, e.at.replace("T", " ")), h("td", {}, e.by), h("td", {}, e.action), h("td", { class: "muted" }, e.detail))))),
       inv.llm_used.length ? h("p", { class: "small" }, "LLM used: " + inv.llm_used.map((u) => `${u.at} ${u.provider}/${u.model}${u.external ? " (external)" : ""}`).join("; ")) : h("p", { class: "muted small" }, "No LLM has processed this investigation."));
@@ -483,13 +580,177 @@ function kqlScratch() {
     h("button", { onclick: () => copy(ta.value) }, "Copy")), out);
 }
 
+// ------------------------------------------------------------------ follow-up input
+const FU_PROMPTS = ["Create a ticket for this incident", "Is this a true positive or benign? Explain why.",
+  "What should I check next, and with which queries?", "Write a short summary I can send to the customer."];
+
+function fuWhen(f) { return f.at.slice(0, 16).replace("T", " ") + " by " + f.by; }
+
+function followupTab(inv) {
+  const fus = inv.followups || [];
+  const timeline = fus.length
+    ? h("ol", { class: "fu-list" }, fus.slice().reverse().map((f) => h("li", { class: "fu-item fu-" + f.kind },
+      h("div", { class: "fu-meta" },
+        h("span", { class: "tag " + (f.kind === "log" ? "fu-log" : "fu-note") }, f.kind === "log" ? "Log" : "Input"),
+        h("span", { class: "mono small" }, f.id), f.source_name ? h("span", { class: "small" }, f.source_name) : null,
+        h("span", { class: "muted small" }, fuWhen(f)),
+        f.kind === "log" ? h("span", { class: "muted small" }, f.chars.toLocaleString() + " chars") : null),
+      h(f.kind === "log" ? "pre" : "div", { class: f.kind === "log" ? "mono raw fu-log-text" : "fu-note-text" }, f.text),
+      fuOutput(f))))
+    : h("p", { class: "muted" }, "Nothing added yet. Input you add here is kept with the investigation and used in every re-analysis.");
+  return h("div", {}, followupComposer(inv), card("Follow-up timeline", timeline));
+}
+
+function fuOutput(f) {
+  const o = f.output;
+  if (!o) return null;
+  const eng = o.engine || {};
+  const parts = [];
+  if (o.reanalyzed) {
+    parts.push(h("div", { class: "fu-out-meta muted small" },
+      eng.mode === "rules+llm" ? `Re-analysed with local rules + ${eng.provider} (${eng.model})${eng.external ? ", external" : ""}`
+        : "Re-analysed with the local rules engine", " · ", o.at.slice(0, 16).replace("T", " ")));
+    if (eng.error) parts.push(h("div", { class: "validation v-warning" }, eng.error));
+    if (o.answer) parts.push(h("div", { class: "fu-answer" }, h("span", { class: "tag llm" }, "LLM"), " ", o.answer));
+    else if (f.kind === "note" && eng.mode !== "rules+llm") {
+      parts.push(h("p", { class: "muted small" }, "Questions are answered only when you re-analyse with an LLM. The input is kept and used in later analyses."));
+    }
+    if (o.summary) parts.push(h("p", { class: "small" }, h("strong", {}, "Summary: "), o.summary));
+    if (o.new_event_types && o.new_event_types.length) parts.push(h("p", { class: "small" }, h("strong", {}, "New event types: "), o.new_event_types.join(", ")));
+    if (o.new_observables && o.new_observables.length) {
+      parts.push(h("div", { class: "small" }, h("strong", {}, `New observables (${o.new_observables.length}): `),
+        o.new_observables.map((x) => h("span", { class: "fu-obs", title: x.type }, h("span", { class: "muted" }, x.type + " "), h("span", { class: "mono" }, x.value)))));
+    }
+    if (o.new_queries && o.new_queries.length) {
+      parts.push(h("div", { class: "small" }, h("strong", {}, "New / updated KQL: "), o.new_queries.map((q) =>
+        h("button", { class: "chip", type: "button", onclick: () => { S.tab = "kql"; showInvestigation(S.inv); } }, q.id + " · " + q.title))));
+    }
+    if (!o.answer && !(o.new_observables || []).length && !(o.new_queries || []).length && !(o.new_event_types || []).length && !eng.error) {
+      parts.push(h("p", { class: "muted small" }, "No new observables, event types or queries from this input."));
+    }
+  } else {
+    parts.push(h("div", { class: "fu-out-meta muted small" }, "Added without re-analysis"));
+  }
+  if (o.ticket && o.ticket.generated) {
+    parts.push(h("div", { class: "row small" }, h("span", { class: "tag fu-ticket" }, "Ticket"),
+      " Generated." + (o.ticket.missing.length ? " Analyst input required: " + o.ticket.missing.join(", ") + "." : "")
+        + ((o.ticket.drafted || []).length ? " LLM-drafted (review): " + o.ticket.drafted.join(", ") + "." : ""),
+      h("button", { class: "small", onclick: () => { S.tab = "ticket"; showInvestigation(S.inv); } }, "Open ticket")));
+  }
+  return h("div", { class: "fu-output" }, h("div", { class: "fu-out-head" }, "Output"), parts);
+}
+
+function followupComposer(inv) {
+  const lim = S.status.limits;
+  let kind = "log";
+  const text = h("textarea", { class: "mono log-input fu-text", spellcheck: "false" });
+  const file = h("input", { type: "file", accept: ".json,.csv,.log,.txt,.xml,.tsv,.ndjson,.jsonl" });
+  const fileRow = h("div", { class: "row" }, h("label", { class: "inline" }, "…or upload a file ", file),
+    h("span", { class: "muted small" }, `max ${Math.round(lim.upload_bytes / 1024 / 1024)} MB, text only`));
+  const chips = h("div", { class: "chips" }, FU_PROMPTS.map((p) => h("button", { class: "chip", type: "button",
+    onclick: () => { text.value = text.value.trim() ? text.value.trim() + "\n" + p : p; text.focus(); syncTicket(); } }, p)));
+  const seg = h("div", { class: "seg", role: "radiogroup" });
+  const setKind = (k) => {
+    kind = k;
+    [...seg.children].forEach((b) => b.classList.toggle("active", b.dataset.k === k));
+    text.classList.toggle("mono", k === "log");
+    text.placeholder = k === "log"
+      ? "Paste more logs: Defender alert / evidence JSON, advanced hunting results, Sentinel rows, raw syslog…"
+      : "Ask a question or give direction, e.g. \"user confirmed they were travelling\", \"create a ticket for this incident\"…";
+    fileRow.classList.toggle("hidden", k !== "log");
+    chips.classList.toggle("hidden", k !== "note");
+    syncTicket();
+  };
+  seg.append(
+    h("button", { type: "button", "data-k": "log", onclick: () => setKind("log") }, "More logs (Defender / raw)"),
+    h("button", { type: "button", "data-k": "note", onclick: () => setKind("note") }, "Question / general input"));
+  const reanalyze = h("input", { type: "checkbox", checked: true });
+  const ticket = h("input", { type: "checkbox" });
+  const ticketHint = h("span", { class: "muted small" });
+  const syncTicket = () => {
+    const asks = kind === "note" && /\b(create|generate|make|raise|open|draft|write|prepare)\b[^.\n]{0,40}\bticket\b/i.test(text.value);
+    ticketHint.textContent = asks && !ticket.checked ? " (your input asks for a ticket, so one will be generated)" : "";
+  };
+  text.addEventListener("input", syncTicket);
+  ticket.addEventListener("change", syncTicket);
+  const mode = llmChoice("fu");
+  const modeWrap = h("div", { class: "fu-mode" }, mode.el);
+  reanalyze.addEventListener("change", () => modeWrap.classList.toggle("hidden", !reanalyze.checked));
+  const submit = h("button", { class: "primary" }, "Add input");
+  submit.addEventListener("click", async () => {
+    const m = mode.get();
+    if (!text.value.trim() && !(kind === "log" && file.files.length)) return toast("Type something or choose a file.", "error");
+    if (kind === "log" && file.files.length && file.files[0].size > lim.upload_bytes) return toast("File exceeds the upload limit.", "error");
+    if (reanalyze.checked && m.use_llm && m.external && !m.confirm_external) return toast("Confirm external processing or choose local analysis.", "error");
+    const wantsTicket = ticket.checked || ticketHint.textContent;
+    if (wantsTicket && inv.ticket && !confirm("This regenerates the ticket and replaces its current text, including manual edits. Continue?")) return;
+    const fd = new FormData();
+    fd.append("kind", kind);
+    fd.append("text", text.value);
+    fd.append("reanalyze", reanalyze.checked);
+    fd.append("generate_ticket", ticket.checked);
+    fd.append("use_llm", reanalyze.checked && m.use_llm);
+    fd.append("confirm_external", m.confirm_external);
+    fd.append("llm_provider", m.llm_provider);
+    if (kind === "log" && file.files.length) fd.append("file", file.files[0]);
+    submit.disabled = true;
+    submit.textContent = reanalyze.checked ? (m.use_llm ? "Re-analysing with LLM… (can take a minute)" : "Re-analysing…") : "Adding…";
+    try {
+      const r = await api(invPath(inv.id) + "/followups", { method: "POST", body: fd });
+      await refreshInvList();
+      const err = r.inv.analysis && r.inv.analysis.engine.error;
+      S.tab = "followup";
+      showInvestigation(r.inv);
+      if (err) toast(err, "error");
+      else if (r.ticket) toast(r.ticket.missing.length ? "Ticket generated. Analyst input required: " + r.ticket.missing.join(", ") : "Ticket generated");
+      else toast(reanalyze.checked ? "Input added and analysis updated" : "Input added");
+    } catch (e) {
+      toast(e.message, "error");
+      submit.disabled = false;
+      submit.textContent = "Add input";
+    }
+  });
+  setKind("log");
+  return h("section", { class: "card fu-card" }, h("h3", {}, "Add to this investigation"),
+    h("p", { class: "muted small" }, "Logs are parsed on their own and merged with the original (observables, queries). " +
+      "Questions and input go to the LLM as analyst direction; its answer appears on the Summary tab. A closed or resolved investigation is reopened."),
+    seg, text, fileRow, chips,
+    h("div", { class: "row fu-opts" },
+      h("label", { class: "inline" }, reanalyze, " Re-analyse with everything so far"),
+      h("label", { class: "inline" }, ticket, " Generate / update the ticket", ticketHint)),
+    modeWrap, h("div", { class: "row" }, submit));
+}
+
 function findingsTab(inv) {
-  const findings = h("textarea", { class: "notes", value: inv.findings, placeholder: "What did your queries show? Confirmed facts, query results, conclusions…" });
-  const notes = h("textarea", { class: "notes", value: inv.analyst_notes, placeholder: "Working notes, contacts, timeline, open questions…" });
+  const ta = (value, placeholder, cls = "notes") => h("textarea", { class: cls, value: value || "", placeholder });
+  const findings = ta(inv.findings, "What did your queries show? Confirmed facts, query results, conclusions… (the outcome)");
+  const risk = ta(inv.risk, "Why this ticket is raised and what the risk is. Leave empty to use the event type and inferred risk.", "notes short");
+  const soc = ta(inv.soc_actions, "What the SOC did, e.g. isolated device, disabled account, blocked IP, reset sessions…", "notes short");
+  const client = ta(inv.client_actions, "What the client needs to do next, e.g. confirm activity with the user, reset password, reimage device…", "notes short");
+  const notes = ta(inv.analyst_notes, "Working notes, contacts, timeline, open questions…");
+  const a = inv.analysis || {};
+  const d = (a.engine || {}).mode === "rules+llm" ? a.ticket_draft || {} : {};
+  // Shows the LLM's draft under a field; the ticket uses it only while the field is empty.
+  const draft = (box, text) => {
+    if (!text) return null;
+    return h("div", { class: "llm-draft" },
+      h("div", { class: "row small" }, h("span", { class: "tag" }, "LLM draft"),
+        h("span", { class: "muted" }, "Used in the ticket while the box is empty."),
+        h("button", { class: "small", onclick: () => { box.value = text; box.focus(); } }, "Copy into box to edit")),
+      h("div", { class: "draft-text small" }, text));
+  };
+  const clientDraft = (d.client_actions || []).map((x) => "- " + x).join("\n");
   return h("div", {},
-    card("Findings", h("p", { class: "muted small" }, "Goes into the ticket's findings section. Record only what you verified."), findings),
+    d.description ? card("Description (LLM draft)", h("p", { class: "muted small" }, "{{description}} in the ticket. Regenerated on each LLM analysis."),
+      h("div", { class: "draft-text" }, d.description)) : null,
+    card("Findings / outcome", h("p", { class: "muted small" }, "Goes into the ticket's findings / outcome. Record only what you verified."), findings, draft(findings, d.outcome)),
+    h("div", { class: "grid3" },
+      card("Why / risk", h("p", { class: "muted small" }, "{{why}} in the ticket."), risk, draft(risk, d.why)),
+      card("Action taken by SOC", h("p", { class: "muted small" }, "{{soc_actions}}: your text, then what the record shows was done."), soc),
+      card("Action for client", h("p", { class: "muted small" }, "{{client_actions}}: required in the SOC standard template."), client, draft(client, clientDraft))),
     card("Analyst notes", notes),
-    h("div", { class: "row" }, h("button", { class: "primary", onclick: () => patch({ findings: findings.value, analyst_notes: notes.value }, "Notes saved") }, "Save findings & notes")));
+    h("div", { class: "row" }, h("button", { class: "primary", onclick: () => patch({ findings: findings.value, analyst_notes: notes.value,
+      risk: risk.value, soc_actions: soc.value, client_actions: client.value }, "Saved") }, "Save findings, actions & notes")));
 }
 
 function ticketTab(inv) {
@@ -502,9 +763,11 @@ function ticketTab(inv) {
       const r = await api(invPath(inv.id) + "/ticket", { method: "POST" });
       ta.value = r.ticket;
       S.inv.ticket = r.ticket;
-      missing.replaceChildren(r.missing.length
+      missing.replaceChildren(...[r.missing.length
         ? h("div", { class: "validation v-warning" }, "Analyst input required: " + r.missing.join(", ") + ". Fill these in before sending.")
-        : h("div", { class: "validation v-ok" }, "Template filled (" + r.template_source + " template)."));
+        : h("div", { class: "validation v-ok" }, "Template filled (" + r.template_source + " template)."),
+        r.drafted.length ? h("div", { class: "validation v-warning" }, "LLM-drafted, review before sending: " + r.drafted.join(", ")
+          + ". Write your own on the Findings & notes tab to replace them.") : null].filter(Boolean));
     } catch (e) { toast(e.message, "error"); }
   });
   return h("div", {}, card("Ticket",
@@ -512,8 +775,117 @@ function ticketTab(inv) {
     h("div", { class: "row" }, gen,
       h("button", { onclick: () => patch({ ticket: ta.value }, "Ticket saved") }, "Save edits"),
       h("button", { onclick: () => copy(ta.value, "Ticket copied") }, "Copy"),
-      h("button", { onclick: () => download(inv.id + ".md", ta.value) }, "Download .md")),
+      h("button", { onclick: () => download(inv.id + ".md", ta.value) }, "Download .md"),
+      h("button", { class: "ghost", onclick: () => showTemplateEditor(inv.id) }, "Edit template")),
     missing, ta));
+}
+
+// ------------------------------------------------------------------ ticket template editor
+async function showTemplateEditor(fromInv = "") {
+  if (!S.customerId) return;
+  setNav("btnTemplate"); closeSidebar();
+  S.inv = null; renderInvList();
+  let file, placeholders, invs, starters;
+  try {
+    [file, placeholders, invs, starters] = await Promise.all([api(custPath() + "/files/template"), api("/ticket-placeholders"),
+      api(custPath() + "/investigations"), api("/ticket-templates")]);
+  } catch (e) { return toast(e.message, "error"); }
+  let loaded = file.content, source = file.source;
+  const editor = h("textarea", { class: "mono editor tpl-editor", spellcheck: "false", value: loaded });
+  const dirty = () => editor.value !== loaded;
+  const srcBadge = h("span", { class: "tag" });
+  const syncSource = () => {
+    srcBadge.textContent = source === "default" ? "default template (shared)" : S.customer.name + " template";
+    srcBadge.className = "tag " + (source === "default" ? "rules" : "internal");
+    revert.classList.toggle("hidden", source === "default");
+    dirtyMark.classList.toggle("hidden", !dirty());
+  };
+  const dirtyMark = h("span", { class: "tag external hidden" }, "unsaved");
+
+  // insert {{placeholder}} at the cursor
+  const insert = (name) => {
+    const tok = "{{" + name + "}}", a = editor.selectionStart, b = editor.selectionEnd;
+    editor.setRangeText(tok, a, b, "end");
+    editor.focus(); changed();
+  };
+  const usedSet = new Set();
+  const chips = placeholders.map((p) => h("button", { class: "chip ph-chip" + (p.required ? " req" : ""), type: "button",
+    title: p.description + (p.required ? " (analyst must fill in)" : ""), "data-ph": p.name, onclick: () => insert(p.name) }, "{{" + p.name + "}}"));
+  const phList = h("div", { class: "ph-list" }, placeholders.map((p, i) => h("div", { class: "ph-row" }, chips[i],
+    h("span", { class: "muted small" }, p.description))));
+
+  const pickInv = h("select", {}, h("option", { value: "" }, "Empty investigation"),
+    invs.map((i) => h("option", { value: i.id, selected: i.id === (fromInv || (invs[0] || {}).id) }, i.id + " · " + i.title)));
+  const preview = h("pre", { class: "mono raw tpl-preview" });
+  const notes = h("div", {});
+  let timer = null;
+  async function renderPreview() {
+    try {
+      const r = await api(custPath() + "/ticket-template/preview", { method: "POST",
+        json: { template: editor.value, investigation_id: pickInv.value } });
+      preview.textContent = r.ticket;
+      usedSet.clear(); r.used.forEach((u) => usedSet.add(u));
+      chips.forEach((c) => c.classList.toggle("used", usedSet.has(c.dataset.ph)));
+      notes.replaceChildren(...[
+        r.unknown.length ? h("div", { class: "validation v-error" }, "Unknown placeholders (will show as \"Analyst input required\"): "
+          + r.unknown.map((u) => "{{" + u + "}}").join(", ")) : null,
+        r.missing.length ? h("div", { class: "validation v-warning" }, "Needs analyst input for this investigation: " + r.missing.join(", ")) : null,
+        (r.drafted || []).length ? h("div", { class: "validation v-warning" }, "Filled from the LLM draft (review): " + r.drafted.join(", ")) : null,
+        !r.unknown.length ? h("div", { class: "validation v-ok" }, `${r.used.length} placeholders, all valid.`) : null].filter(Boolean));
+    } catch (e) { notes.replaceChildren(h("div", { class: "validation v-error" }, e.message)); }
+  }
+  function changed() {
+    syncSource();
+    clearTimeout(timer); timer = setTimeout(renderPreview, 350);
+  }
+  editor.addEventListener("input", changed);
+  pickInv.addEventListener("change", renderPreview);
+
+  const save = h("button", { class: "primary" }, "Save template");
+  save.addEventListener("click", async () => {
+    try {
+      await api(custPath() + "/files/template", { method: "PUT", json: { content: editor.value, filename: "" } });
+      loaded = editor.value; source = "customer";
+      await refreshCustomer(); syncSource();
+      toast("Template saved for " + S.customer.name + ". New and regenerated tickets use it.");
+    } catch (e) { toast(e.message, "error"); }
+  });
+  const reset = h("button", { onclick: () => { if (!dirty() || confirm("Discard unsaved changes?")) { editor.value = loaded; changed(); } } }, "Discard changes");
+  const revert = h("button", { class: "ghost" }, "Revert to default");
+  revert.addEventListener("click", async () => {
+    if (!confirm("Delete " + S.customer.name + "'s template and use the default template?")) return;
+    try {
+      await api(custPath() + "/files/template", { method: "DELETE" });
+      await refreshCustomer();
+      toast("Using the default template");
+      showTemplateEditor(fromInv);
+    } catch (e) { toast(e.message, "error"); }
+  });
+  const starterPick = h("select", {}, h("option", { value: "" }, "Load starter…"),
+    starters.map((t) => h("option", { value: t.id }, t.label)));
+  starterPick.addEventListener("change", () => {
+    const t = starters.find((x) => x.id === starterPick.value);
+    starterPick.value = "";
+    if (!t || (editor.value.trim() && !confirm(`Replace the editor content with "${t.label}"? Nothing is saved until you click Save template.`))) return;
+    editor.value = t.content; changed();
+    toast("Loaded " + t.label + ". Review the preview, then Save template.");
+  });
+  const back = fromInv ? h("button", { onclick: () => { if (dirty() && !confirm("Leave without saving?")) return; S.tab = "ticket"; setNav(""); openInvestigation(fromInv); } }, "← Back to " + fromInv) : null;
+
+  $("main").replaceChildren(h("div", { class: "page" },
+    h("div", { class: "page-head" }, h("div", {}, h("h2", {}, "Ticket template · " + S.customer.name),
+      h("div", { class: "row" }, srcBadge, dirtyMark,
+        h("span", { class: "muted small" }, source === "default" ? "Saving creates a copy for " + S.customer.name + " only." : "customers/" + S.customer.id + "/templates/incident-ticket.md"))),
+      h("div", { class: "row" }, back, starterPick, reset, revert, save)),
+    h("div", { class: "tpl-grid" },
+      h("div", {}, card("Template (Markdown)",
+        h("p", { class: "muted small" }, "Write Markdown and use {{placeholders}}; click one on the right to insert it at the cursor. " +
+          "Values come only from the investigation. Empty ones become \"Unknown / Not observed\"; severity and findings ask for analyst input. Secrets are always redacted."),
+        editor),
+        card("Preview", h("div", { class: "row" }, h("label", { class: "inline" }, "Preview with ", pickInv)), notes, preview)),
+      card("Placeholders", phList))));
+  syncSource();
+  renderPreview();
 }
 
 // ------------------------------------------------------------------ customer config

@@ -22,9 +22,13 @@ from app.llm.claude_cli import bridge_request
 from app.llm.config_store import ConfigError
 from app.llm.factory import LLMGate, build_provider_for
 from app.llm.registry import SPECS
-from app.security import InputError, clean_text, decode_upload
-from app.storage.investigations import SEVERITIES, STATUSES, InvestigationStore
-from app.tickets.render import render_ticket
+from app.security import InputError, clean_text, decode_upload, scrub_secrets
+from app.storage.investigations import (SEVERITIES, STATUSES, InvestigationStore, combined_log, followup_logs,
+                                        followup_notes)
+from app.tickets.render import ANALYST_FIELDS, PLACEHOLDER_DOCS, render_ticket_full, template_placeholders
+
+# A follow-up note like "please create a ticket for this" also generates the ticket.
+TICKET_INTENT = re.compile(r"\b(create|generate|make|raise|open|draft|write|prepare)\b[^.\n]{0,40}\bticket\b", re.I)
 
 
 class CustomerIn(BaseModel):
@@ -56,6 +60,9 @@ class UpdateIn(BaseModel):
     context: str | None = None
     ticket: str | None = None
     assigned_to: str | None = None
+    risk: str | None = None
+    soc_actions: str | None = None
+    client_actions: str | None = None
 
 
 class SelectionIn(BaseModel):
@@ -80,11 +87,35 @@ class APIKeyIn(BaseModel):
     api_key: str = Field(max_length=400)
 
 
+class TemplatePreviewIn(BaseModel):
+    template: str = Field(max_length=200_000)
+    investigation_id: str = Field("", max_length=40)
+
+
 class KQLIn(BaseModel):
     query: str
 
 
 _NAME_RE = re.compile(r"[^\w .@'-]")
+
+
+def followup_diff(before: dict, after: dict) -> dict:
+    """What a re-analysis after a follow-up changed: the LLM's answer plus new
+    event types, observables and queries compared with the previous analysis."""
+    eng = after.get("engine", {})
+    old_obs = {(o["type"], o["value"].lower()) for o in before.get("observables", [])}
+    old_types = {e["type"] for e in before.get("event_types", [])}
+    old_q = {q["query"] for q in before.get("kql_queries", [])}
+    return {
+        "engine": {k: eng.get(k) for k in ("mode", "provider", "model", "external", "error")},
+        "answer": scrub_secrets(after.get("analyst_response", "")) if eng.get("mode") == "rules+llm" else "",
+        "summary": after.get("summary", ""),
+        "new_event_types": [e["label"] for e in after.get("event_types", []) if e["type"] not in old_types],
+        "new_observables": [{"type": o["label"], "value": o["value"]} for o in after.get("observables", [])
+                            if (o["type"], o["value"].lower()) not in old_obs][:30],
+        "new_queries": [{"id": q["id"], "title": q["title"]} for q in after.get("kql_queries", [])
+                        if q["query"] not in old_q][:10],
+    }
 
 
 def build_router(settings: Settings) -> APIRouter:
@@ -130,9 +161,11 @@ def build_router(settings: Settings) -> APIRouter:
         if provider is not None:
             audit.record("llm.send", analyst=who, customer=prof.id, investigation=inv["id"],
                          provider=provider.name, model=provider.model, external=provider.is_external,
-                         log_chars=min(len(inv["raw_log"]), settings.llm_max_log_chars))
+                         log_chars=min(len(combined_log(inv)), settings.llm_max_log_chars),
+                         followups=len(inv.get("followups") or []))
         result = analyze(prof, inv["raw_log"], inv.get("context", ""), provider,
-                         settings.llm_max_log_chars, settings.llm_max_context_chars)
+                         settings.llm_max_log_chars, settings.llm_max_context_chars,
+                         extra_logs=followup_logs(inv), notes=followup_notes(inv))
         audit.record("investigation.analyze", analyst=who, customer=prof.id, investigation=inv["id"],
                      mode=result["engine"]["mode"], llm_error=bool(result["engine"]["error"]),
                      queries=len(result["kql_queries"]))
@@ -410,6 +443,34 @@ def build_router(settings: Settings) -> APIRouter:
         prof = profile(cid)
         return {"ok": True, "warnings": prof.warnings, "tables": len(prof.tables)}
 
+    @r.get("/ticket-placeholders")
+    def ticket_placeholders():
+        return [{"name": k, "description": v, "required": k in ANALYST_FIELDS} for k, v in PLACEHOLDER_DOCS.items()]
+
+    @r.get("/ticket-templates")
+    def starter_templates():
+        """Built-in templates (templates/*.md) an analyst can load into the editor."""
+        tdir = settings.default_template.parent
+        label = {"incident-ticket.md": "Detailed (default)",
+                 "soc-standard-ticket.md": "SOC standard (Subject / When / Who / Where / Why)"}
+        out = []
+        for p in sorted(tdir.glob("*.md")):
+            if p.name.lower() == "readme.md":
+                continue
+            out.append({"id": p.stem, "label": label.get(p.name, p.stem), "content": p.read_text(encoding="utf-8")})
+        return out
+
+    @r.post("/customers/{cid}/ticket-template/preview")
+    def preview_template(cid: str, body: TemplatePreviewIn, request: Request):
+        """Render an unsaved template against one of this customer's
+        investigations (or an empty one). Nothing is stored."""
+        prof = profile(cid)
+        inv = get_inv(cid, body.investigation_id) if body.investigation_id else {
+            "id": "INV-0000-000000", "title": "Example investigation", "status": "New", "created": ""}
+        text, missing, drafted = render_ticket_full(clean_text(body.template), inv, prof, analyst(request))
+        used, unknown = template_placeholders(body.template)
+        return {"ticket": text, "missing": missing, "drafted": drafted, "used": used, "unknown": unknown}
+
     @r.post("/customers/{cid}/kql/validate")
     def validate(cid: str, body: KQLIn):
         return validate_kql(body.query[:50_000], profile(cid))
@@ -480,15 +541,57 @@ def build_router(settings: Settings) -> APIRouter:
         return run_analysis(request, prof, get_inv(cid, iid), body.use_llm, body.confirm_external,
                             body.llm_provider)
 
+    def make_ticket(prof: CustomerProfile, inv: dict, who: str) -> dict:
+        text, missing, drafted = render_ticket_full(prof.ticket_template, inv, prof, who)
+        store.save_ticket(prof.id, inv["id"], text, who)
+        audit.record("ticket.generate", analyst=who, customer=prof.id, investigation=inv["id"],
+                     template=prof.ticket_template_source, missing=missing, llm_drafted=drafted)
+        return {"ticket": text, "missing": missing, "drafted": drafted, "template_source": prof.ticket_template_source}
+
     @r.post("/customers/{cid}/investigations/{iid}/ticket")
     def ticket(cid: str, iid: str, request: Request):
+        return make_ticket(profile(cid), get_inv(cid, iid), analyst(request))
+
+    @r.post("/customers/{cid}/investigations/{iid}/followups")
+    async def add_followup(cid: str, iid: str, request: Request, kind: str = Form("note", max_length=10),
+                           text: str = Form(""), reanalyze: bool = Form(True), use_llm: bool = Form(False),
+                           confirm_external: bool = Form(False), llm_provider: str = Form("", max_length=40),
+                           generate_ticket: bool = Form(False), file: UploadFile | None = File(None)):
+        """More input after the first analysis: extra logs (Defender, raw) or a
+        general note/question. Optionally re-analyses with everything so far
+        and regenerates the ticket (also when a note asks for one)."""
         prof = profile(cid)
-        inv = get_inv(cid, iid)
-        who = analyst(request)
-        text, missing = render_ticket(prof.ticket_template, inv, prof, who)
-        store.save_ticket(cid, iid, text, who)
-        audit.record("ticket.generate", analyst=who, customer=cid, investigation=iid,
-                     template=prof.ticket_template_source, missing=missing)
-        return {"ticket": text, "missing": missing, "template_source": prof.ticket_template_source}
+        get_inv(cid, iid)
+        source = ""
+        try:
+            if file is not None and file.filename:
+                data = await file.read(settings.max_upload_bytes + 1)
+                upload = decode_upload(data, settings.max_upload_bytes)
+                text = (text + "\n" + upload).strip() if text.strip() else upload
+                source = re.sub(r"[^\w.\-]", "_", file.filename)[:120]
+                kind = "log"
+            text = clean_text(text, settings.max_log_chars if kind == "log" else 20_000)
+            who = analyst(request)
+            inv = store.add_followup(cid, iid, kind=kind, text=text, analyst=who, source_name=source,
+                                     max_log_chars=settings.max_log_chars)
+        except InputError as e:
+            raise HTTPException(400, str(e))
+        wants_ticket = generate_ticket or (kind == "note" and bool(TICKET_INTENT.search(text)))
+        audit.record("investigation.followup", analyst=who, customer=cid, investigation=iid, kind=kind,
+                     chars=len(text), upload=bool(source), reanalyze=reanalyze, ticket=wants_ticket)
+        fid = inv["followups"][-1]["id"]
+        before = inv.get("analysis") or {}
+        output: dict = {"reanalyzed": reanalyze}
+        if reanalyze:
+            from starlette.concurrency import run_in_threadpool
+            inv = await run_in_threadpool(run_analysis, request, prof, inv, use_llm, confirm_external,
+                                         llm_provider)
+            output |= followup_diff(before, inv["analysis"])
+        ticket_out = None
+        if wants_ticket:
+            ticket_out = make_ticket(prof, get_inv(cid, iid), who)
+            output["ticket"] = {"generated": True, "missing": ticket_out["missing"], "drafted": ticket_out["drafted"]}
+        inv = store.set_followup_output(cid, iid, fid, output)
+        return {"inv": inv, "ticket": ticket_out}
 
     return r

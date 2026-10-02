@@ -163,3 +163,147 @@ def test_external_llm_switches(tmp_path):
     from app.llm.base import LLMError
     with pytest.raises(LLMError):
         gate.set_external(True)
+
+
+def test_followup_logs_notes_and_ticket(client, tmp_path):
+    inv = client.post("/api/customers/contoso/investigations", data={"title": "Sign-in"},
+                      files={"file": ("s.json", example("contoso", "failed-signin.json").encode(), "application/json")}).json()
+    path = f"/api/customers/contoso/investigations/{inv['id']}"
+    client.patch(path, json={"status": "Closed"})
+
+    # more logs: parsed separately, observables merged, investigation reopened
+    extra = '{"DeviceName": "ws-0142", "RemoteIP": "203.0.113.77", "FileName": "invoice.exe"}'
+    r = client.post(path + "/followups", data={"kind": "log"},
+                    files={"file": ("defender evidence.json", extra.encode(), "application/json")})
+    assert r.status_code == 200, r.text
+    out = r.json()
+    assert out["ticket"] is None
+    fu = out["inv"]["followups"][0]
+    assert fu["kind"] == "log" and fu["source_name"] == "defender_evidence.json" and fu["id"] == "F1"
+    assert out["inv"]["status"] == "Investigating"
+    vals = {o["value"]: o for o in out["inv"]["analysis"]["observables"]}
+    assert "203.0.113.77" in vals and vals["203.0.113.77"]["sources"][0] == "follow-up F1"
+    assert "185.220.101.47" in vals  # original observables kept
+    assert out["inv"]["analysis"]["parsed"]["followup_logs"] == 1
+    o = fu["output"]
+    assert o["reanalyzed"] and o["engine"]["mode"] == "rules" and o["answer"] == ""
+    assert {"type": "IP address", "value": "203.0.113.77"} in o["new_observables"] or \
+        any(x["value"] == "203.0.113.77" for x in o["new_observables"])
+    assert not any(x["value"] == "185.220.101.47" for x in o["new_observables"])  # only what is new
+
+    # a note asking for a ticket generates one, with the follow-up log as evidence
+    r = client.post(path + "/followups", data={"kind": "note", "text": "User confirmed travel. Please create a ticket for this.",
+                                               "reanalyze": "false"}).json()
+    assert r["ticket"] and "203.0.113.77" in r["ticket"]["ticket"] and "User confirmed travel" in r["ticket"]["ticket"]
+    assert [h["action"] for h in r["inv"]["history"]].count("follow-up added") == 2
+    assert r["inv"]["followups"][1]["output"] == r["inv"]["followups"][1]["output"] | {
+        "reanalyzed": False, "ticket": {"generated": True, "missing": r["ticket"]["missing"], "drafted": []}}
+
+    # plain note without ticket intent, no re-analysis
+    r = client.post(path + "/followups", data={"kind": "note", "text": "What next?", "reanalyze": "false"}).json()
+    assert r["ticket"] is None and len(r["inv"]["followups"]) == 3
+
+    assert client.post(path + "/followups", data={"kind": "note", "text": "  "}).status_code == 400
+    assert client.post(path + "/followups", data={"kind": "bogus", "text": "x"}).status_code == 400
+    # isolation
+    assert client.post(f"/api/customers/fabrikam/investigations/{inv['id']}/followups",
+                       data={"kind": "note", "text": "x"}).status_code == 404
+    audit = (tmp_path / "data" / "audit.log").read_text()
+    assert "investigation.followup" in audit
+    assert "203.0.113.77" not in audit and "confirmed travel" not in audit
+
+
+def test_followup_size_limit(customers_dir, tmp_path):
+    c = make_client(customers_dir, tmp_path, max_log_chars=3000)
+    inv = c.post("/api/customers/contoso/investigations", data={"raw_log": "a=1 " * 500}).json()
+    r = c.post(f"/api/customers/contoso/investigations/{inv['id']}/followups", data={"kind": "log", "text": "b=2 " * 400})
+    assert r.status_code == 400 and "exceed" in r.json()["detail"]
+
+
+def test_followup_note_reaches_llm(customers_dir, tmp_path, monkeypatch):
+    from app.llm import factory
+    seen = {}
+
+    class Answering(FakeExternal):
+        def analyze(self, system, prompt, schema):
+            seen["prompt"] = prompt
+            return super().analyze(system, prompt, schema) | {"analyst_response": "Likely benign travel."}
+
+    monkeypatch.setattr(factory, "build_provider", lambda *a: Answering())
+    c = make_client(customers_dir, tmp_path, llm_provider="fake", llm_allow_external=True)
+    inv = c.post("/api/customers/contoso/investigations",
+                 data={"raw_log": example("contoso", "failed-signin.json"), "analyze_now": "false"}).json()
+    r = c.post(f"/api/customers/contoso/investigations/{inv['id']}/followups",
+               data={"kind": "note", "text": "Is this true positive?", "use_llm": "true", "confirm_external": "true"}).json()
+    assert r["inv"]["analysis"]["analyst_response"] == "Likely benign travel."
+    assert r["inv"]["followups"][0]["output"]["answer"] == "Likely benign travel."
+    assert "Is this true positive?" in seen["prompt"] and "analyst_response" in seen["prompt"]
+
+
+def test_ticket_template_preview(client):
+    names = {p["name"] for p in client.get("/api/ticket-placeholders").json()}
+    assert {"title", "findings", "evidence", "analyst_notes"} <= names
+    inv = client.post("/api/customers/contoso/investigations",
+                      data={"raw_log": example("contoso", "failed-signin.json") + "\npassword=Hunter2!!"}).json()
+    tpl = "# {{title}} for {{customer}}\n{{evidence}}\n{{nope}}"
+    r = client.post("/api/customers/contoso/ticket-template/preview", json={"template": tpl, "investigation_id": inv["id"]})
+    d = r.json()
+    assert r.status_code == 200 and "Contoso" in d["ticket"] and "Hunter2" not in d["ticket"]
+    assert d["unknown"] == ["nope"] and d["used"] == ["title", "customer", "evidence", "nope"]
+    assert client.post("/api/customers/contoso/ticket-template/preview", json={"template": tpl}).status_code == 200
+    # isolation: can't preview another customer's investigation
+    assert client.post("/api/customers/fabrikam/ticket-template/preview",
+                       json={"template": tpl, "investigation_id": inv["id"]}).status_code == 404
+
+
+def test_soc_standard_template(client):
+    starters = {t["id"]: t for t in client.get("/api/ticket-templates").json()}
+    assert {"incident-ticket", "soc-standard-ticket"} <= set(starters)
+    tpl = starters["soc-standard-ticket"]["content"]
+    log = ('{"TimeGenerated": "2026-07-01T07:42:19Z", "UserPrincipalName": "a.lee@contoso.com", '
+           '"DeviceName": "LT-0042", "AppDisplayName": "Office 365", "IPAddress": "185.220.101.47"}')
+    inv = client.post("/api/customers/contoso/investigations", data={"title": "Odd sign-in", "raw_log": log}).json()
+    path = f"/api/customers/contoso/investigations/{inv['id']}"
+    d = client.post("/api/customers/contoso/ticket-template/preview", json={"template": tpl, "investigation_id": inv["id"]}).json()
+    t = d["ticket"]
+    assert d["unknown"] == [] and "client_actions" in d["missing"]
+    assert "01/07/2026 08:42:19 BST (07:42:19 UTC)" in t  # British summer time
+    assert "**Who:** a.lee@contoso.com" in t and "- Device: LT-0042" in t and "- Application: Office 365" in t
+    assert "Prepared" in t and "KQL hunting queries" in t  # factual SOC actions, never "ran"
+    client.patch(path, json={"client_actions": "Reset the user's password.", "soc_actions": "Revoked sessions.",
+                             "risk": "Possible account takeover.", "severity": "High", "findings": "Not travel."})
+    d = client.post("/api/customers/contoso/ticket-template/preview", json={"template": tpl, "investigation_id": inv["id"]}).json()
+    assert d["missing"] == [] and "Reset the user's password." in d["ticket"] and "Possible account takeover." in d["ticket"]
+    assert "Revoked sessions." in d["ticket"] and d["ticket"].startswith("**Subject:** High | ")
+
+
+def test_llm_ticket_draft(customers_dir, tmp_path, monkeypatch):
+    """Facts come from the log; description/outcome/why/client actions from the LLM
+    draft (labelled) until the analyst writes their own."""
+    from app.llm import factory
+    draft = {"description": "a.lee signed in from a Tor exit node.", "outcome": "Suspicious, pending user confirmation.",
+             "why": "Possible account takeover.", "client_actions": ["Confirm the sign-in with the user.", "Reset the password."]}
+
+    class Drafting(FakeExternal):
+        def analyze(self, system, prompt, schema):
+            assert "ticket" in schema["required"]
+            return super().analyze(system, prompt, schema) | {"ticket": draft}
+
+    monkeypatch.setattr(factory, "build_provider", lambda *a: Drafting())
+    c = make_client(customers_dir, tmp_path, llm_provider="fake", llm_allow_external=True)
+    tpl = {t["id"]: t for t in c.get("/api/ticket-templates").json()}["soc-standard-ticket"]["content"]
+    log = '{"TimeGenerated": "2026-07-01T07:42:19Z", "UserPrincipalName": "a.lee@contoso.com", "IPAddress": "185.220.101.47"}'
+    inv = c.post("/api/customers/contoso/investigations", data={"raw_log": log, "analyze_now": "false"}).json()
+    path = f"/api/customers/contoso/investigations/{inv['id']}"
+    c.post(path + "/analyze", json={"use_llm": True, "confirm_external": True})
+    prev = lambda: c.post("/api/customers/contoso/ticket-template/preview",
+                          json={"template": tpl, "investigation_id": inv["id"]}).json()
+    d = prev()
+    t = d["ticket"]
+    assert d["drafted"] == ["client_actions", "description", "findings", "why"] and d["missing"] == ["severity"]
+    assert "a.lee signed in from a Tor exit node.\n_(LLM draft" in t and "- Reset the password." in t
+    assert "Outcome: Suspicious, pending user confirmation." in t and "**Who:** a.lee@contoso.com" in t
+    assert "01/07/2026 08:42:19 BST" in t  # still extracted from the log
+    c.patch(path, json={"findings": "Confirmed travel.", "client_actions": "None.", "risk": "Low."})
+    d = prev()
+    assert d["drafted"] == ["description"] and "Confirmed travel." in d["ticket"] and "Reset the password." not in d["ticket"]
