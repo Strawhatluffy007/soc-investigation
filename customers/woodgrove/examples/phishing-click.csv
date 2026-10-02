@@ -1,0 +1,3 @@
+Timestamp,NetworkMessageId,RecipientEmailAddress,SenderFromAddress,SenderIPv4,Subject,Url,ActionType,IsClickedThrough,ThreatTypes,DeliveryAction
+2026-09-30T09:14:02Z,8d3e5f1a-22b4-4c6d-9e8f-0a1b2c3d4e5f,m.okafor@woodgrovebank.com,payments@woodgrove-bank-secure.example,192.0.2.150,Urgent: SWIFT transfer verification required,hxxps://woodgrove-bank-secure.example/verify,ClickAllowed,true,Phish,Delivered
+2026-09-30T09:16:40Z,8d3e5f1a-22b4-4c6d-9e8f-0a1b2c3d4e5f,a.lindqvist@woodgrovebank.com,payments@woodgrove-bank-secure.example,192.0.2.150,Urgent: SWIFT transfer verification required,hxxps://woodgrove-bank-secure.example/verify,ClickBlocked,false,Phish,Delivered

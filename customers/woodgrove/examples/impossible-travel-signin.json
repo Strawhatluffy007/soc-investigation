@@ -1,0 +1,19 @@
+{
+  "TimeGenerated": "2026-09-28T07:42:19Z",
+  "UserPrincipalName": "e.hughes@woodgrovebank.com",
+  "UserDisplayName": "Emma Hughes",
+  "AppDisplayName": "Office 365 Exchange Online",
+  "IPAddress": "192.0.2.77",
+  "Location": "SG",
+  "LocationDetails": {"city": "Singapore", "countryOrRegion": "SG"},
+  "ResultType": "0",
+  "ResultDescription": "Success",
+  "ConditionalAccessStatus": "success",
+  "AuthenticationRequirement": "singleFactorAuthentication",
+  "ClientAppUsed": "Browser",
+  "UserAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/128.0",
+  "DeviceDetail": {"deviceId": "", "operatingSystem": "Windows10", "isCompliant": false},
+  "RiskLevelDuringSignIn": "medium",
+  "PreviousSignIn": {"TimeGenerated": "2026-09-28T06:58:02Z", "IPAddress": "198.51.100.12", "Location": "GB"},
+  "CorrelationId": "6f1c2a9e-4b7d-4e0a-9c55-1d2e3f4a5b6c"
+}

@@ -9,8 +9,9 @@ data/*
 !data/README.md
 
 # Real customer data stays on this machine. Only the blank template is tracked;
-# sample customers live in samples/customers/.
+# sample customers live in samples/customers/; customers/woodgrove/ is a fictional sample kept here.
 customers/*
 !customers/_template/
 !customers/README.md
+!customers/woodgrove/
 catalog/*.bak*
