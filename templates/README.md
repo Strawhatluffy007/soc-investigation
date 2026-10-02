@@ -1,4 +1,8 @@
-# templates/
+# 🎫 `templates/`
+
+> Default ticket templates
+
+<sub>[🏠 Home](../README.md) › **templates/**</sub>
 
 | File | Purpose |
 |---|---|

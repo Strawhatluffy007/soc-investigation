@@ -1,4 +1,8 @@
-# app/tickets/
+# 🎫 `app/tickets/`
+
+> Ticket rendering
+
+<sub>[🏠 Home](../../README.md) › [app/](../README.md) › **tickets/**</sub>
 
 | File | Purpose |
 |---|---|

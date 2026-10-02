@@ -1,6 +1,13 @@
-# bridge/
+# 🌉 `bridge/`
 
-Lets the container use your **Claude Pro/Max subscription** through the Claude Code CLI on the host, without an API key. Only needed when `LLM_PROVIDER=claude_pro`. See `docs/llm.md`.
+> Host bridge to the Claude Code CLI
+
+<sub>[🏠 Home](../README.md) › **bridge/**</sub>
+
+Lets the container use your **Claude Pro/Max** (Claude Code CLI) or **ChatGPT Plus/Pro** (Codex CLI) subscription on the host, without an API key.
+
+> [!NOTE]
+> You only need the bridge for the `claude_pro` and `chatgpt` providers. See [docs/llm.md](../docs/llm.md).
 
 | File | Purpose |
 |---|---|

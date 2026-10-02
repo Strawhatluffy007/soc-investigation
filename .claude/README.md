@@ -1,4 +1,8 @@
-# .claude/
+# 🤖 `.claude/`
+
+> Claude Code agents & skills for developing this project
+
+<sub>[🏠 Home](../README.md) › **.claude/**</sub>
 
 Claude Code agents and skills for working on this project, taken from [aitmpl.com](https://aitmpl.com/) ([davila7/claude-code-templates](https://github.com/davila7/claude-code-templates), MIT). They are only Markdown instructions: no scripts, hooks or permission changes.
 

@@ -1,6 +1,11 @@
-# app/llm/
+# 🤖 `app/llm/`
 
-Optional LLM analysis. Off by default (`LLM_PROVIDER=none`). Choose the provider in the web UI under **LLM settings**.
+> Optional LLM providers & gates
+
+<sub>[🏠 Home](../../README.md) › [app/](../README.md) › **llm/**</sub>
+
+> [!NOTE]
+> LLM analysis is optional and **off by default** (`LLM_PROVIDER=none`). Choose the provider in the web UI under **LLM settings**. External providers must pass four gates: the env cap, the UI switch, the per-customer allowance and the analyst's confirmation on each run.
 
 | File | Purpose |
 |---|---|

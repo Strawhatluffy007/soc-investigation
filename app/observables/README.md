@@ -1,4 +1,8 @@
-# app/observables/
+# 🔎 `app/observables/`
+
+> IOC / entity extraction
+
+<sub>[🏠 Home](../../README.md) › [app/](../README.md) › **observables/**</sub>
 
 | File | Purpose |
 |---|---|

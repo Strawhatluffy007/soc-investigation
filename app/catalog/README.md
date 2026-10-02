@@ -1,4 +1,8 @@
-# app/catalog/
+# 🗂️ `app/catalog/`
+
+> Global schema catalog
+
+<sub>[🏠 Home](../../README.md) › [app/](../README.md) › **catalog/**</sub>
 
 The global schema catalog: one Markdown file (`catalog/schema-catalog.md`) listing every schema, table and column, pulled from Microsoft Learn plus your own custom tables. Each customer selects the tables they actually have.
 

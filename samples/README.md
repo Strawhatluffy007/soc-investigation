@@ -1,7 +1,12 @@
-# samples/
+# 🧪 `samples/`
 
-Fictional sample data only. No real customer data.
+> Fictional sample data
+
+<sub>[🏠 Home](../README.md) › **samples/**</sub>
+
+> [!NOTE]
+> Fictional sample data only. No real customer data.
 
 | Path | Purpose |
 |---|---|
-| `customers/` | Two sample customers (Contoso, Fabrikam) and the blank `_template`. The test suite uses this folder; copy customers into `customers/` to try the app. |
+| 🧪 `customers/` | Four sample customers (Contoso, Fabrikam, Northwind, Tailspin) and the blank `_template`. The test suite uses this folder. To try the app with them, copy the customers into `customers/`. |

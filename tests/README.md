@@ -1,6 +1,15 @@
-# tests/
+# ✅ `tests/`
 
-Run with `.venv/bin/python -m pytest -q`. Tests copy `samples/customers/` into a temp folder, so your real customer data is never touched.
+> Test suite
+
+<sub>[🏠 Home](../README.md) › **tests/**</sub>
+
+```bash
+.venv/bin/python -m pytest -q
+```
+
+> [!NOTE]
+> The tests copy `samples/customers/` into a temp folder, so they never touch your real customer data.
 
 | File | Covers |
 |---|---|

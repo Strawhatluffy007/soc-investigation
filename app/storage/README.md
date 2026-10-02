@@ -1,4 +1,8 @@
-# app/storage/
+# 💾 `app/storage/`
+
+> Investigation storage
+
+<sub>[🏠 Home](../../README.md) › [app/](../README.md) › **storage/**</sub>
 
 | File | Purpose |
 |---|---|

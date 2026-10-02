@@ -1,6 +1,11 @@
-# app/
+# ⚡ `app/`
 
-The FastAPI backend. Everything runs locally; nothing here calls out to the internet except the optional LLM providers (`llm/`) and the schema catalog pull (`catalog/fetch.py`, learn.microsoft.com only).
+> The FastAPI backend
+
+<sub>[🏠 Home](../README.md) › **app/**</sub>
+
+> [!NOTE]
+> Everything runs locally. The only code here that calls out to the internet is the optional LLM providers (`llm/`) and the schema catalog pull (`catalog/fetch.py`, learn.microsoft.com only).
 
 | Path | Purpose |
 |---|---|

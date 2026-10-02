@@ -1,4 +1,8 @@
-# static/
+# 🖥️ `static/`
+
+> Web UI
+
+<sub>[🏠 Home](../README.md) › **static/**</sub>
 
 The web UI: a single-page app in plain JavaScript (no build step, no CDN). Served by FastAPI with a strict CSP (`'self'` only), and all text is rendered with `textContent`.
 

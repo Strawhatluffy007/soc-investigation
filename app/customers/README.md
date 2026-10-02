@@ -1,4 +1,8 @@
-# app/customers/
+# 🏢 `app/customers/`
+
+> Customer knowledge loader
+
+<sub>[🏠 Home](../../README.md) › [app/](../README.md) › **customers/**</sub>
 
 | File | Purpose |
 |---|---|

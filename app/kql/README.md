@@ -1,4 +1,8 @@
-# app/kql/
+# 🧭 `app/kql/`
+
+> KQL generation & validation
+
+<sub>[🏠 Home](../../README.md) › [app/](../README.md) › **kql/**</sub>
 
 | File | Purpose |
 |---|---|

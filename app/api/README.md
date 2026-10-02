@@ -1,4 +1,8 @@
-# app/api/
+# 🔌 `app/api/`
+
+> REST API routes
+
+<sub>[🏠 Home](../../README.md) › [app/](../README.md) › **api/**</sub>
 
 | File | Purpose |
 |---|---|

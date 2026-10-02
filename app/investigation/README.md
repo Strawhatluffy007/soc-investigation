@@ -1,4 +1,8 @@
-# app/investigation/
+# 🧠 `app/investigation/`
+
+> Analysis pipeline
+
+<sub>[🏠 Home](../../README.md) › [app/](../README.md) › **investigation/**</sub>
 
 | File | Purpose |
 |---|---|

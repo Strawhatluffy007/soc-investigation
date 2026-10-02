@@ -1,4 +1,8 @@
-# catalog/
+# 📚 `catalog/`
+
+> Schema catalog data
+
+<sub>[🏠 Home](../README.md) › **catalog/**</sub>
 
 | File | Purpose |
 |---|---|
