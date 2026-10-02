@@ -1,0 +1,10 @@
+# Windows / macOS (Docker Desktop) override. Use with:
+#   docker compose -f docker-compose.yml -f docker-compose.windows.yml up -d --build
+# The base file pins host.docker.internal to the Linux bridge gateway (for the
+# Claude CLI bridge on the Pi). Docker Desktop's own host.docker.internal is the
+# Windows host, where Ollama runs, so restore it with host-gateway.
+services:
+  soc:
+    extra_hosts: !override
+      - "host.docker.internal:host-gateway"
+    mem_limit: 1g

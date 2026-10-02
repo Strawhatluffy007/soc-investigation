@@ -21,7 +21,7 @@ Pick the active provider, models, endpoints and API keys in the web UI: **LLM se
 | `openai` | **API key** `OPENAI_API_KEY` | OpenAI Chat Completions with JSON-schema output | **Yes** |
 | `gemini` | **API key** `GEMINI_API_KEY` | Google Gemini through its OpenAI-compatible endpoint | **Yes** |
 | `openai_compatible` | **API key** `OPENAI_COMPAT_API_KEY` + endpoint URL | OpenRouter, Groq, Mistral, DeepSeek or any other `/chat/completions` API | **Yes** |
-| `ollama` | – | Local model via Ollama `/api/chat` | No, unless `OLLAMA_IS_LOCAL=false` |
+| `ollama` | – | Local model via Ollama `/api/chat`. Set `OLLAMA_NUM_CTX` to fit the prompt; see [windows.md](windows.md) for sizing on a small GPU | No, unless `OLLAMA_IS_LOCAL=false` |
 
 **API keys.** A key in `.env` always wins and can't be changed from the UI. A key pasted in the UI is stored in `data/secrets/llm-keys.json` (mode 0600, git-ignored). The API never returns a key, and the audit log records only that a key was set or removed (`settings.llm_key.set` / `.delete`). Every provider switch and settings change is audited too.
 

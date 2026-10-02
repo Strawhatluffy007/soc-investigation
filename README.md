@@ -48,6 +48,9 @@ cp -r samples/customers/*/ customers/   # optional: fictional sample customers
 docker compose up -d --build            # → http://127.0.0.1:8090
 ```
 
+> [!TIP]
+> **On Windows?** Add the Docker Desktop override: `docker compose -f docker-compose.yml -f docker-compose.windows.yml up -d --build`. See [docs/windows.md](docs/windows.md) for the Ollama/GPU setup.
+
 <details>
 <summary><b>Other commands</b></summary>
 
@@ -182,6 +185,7 @@ Every folder has its own `README.md` describing its files.
 | `CLAUDE_BRIDGE_URL` / `CLAUDE_BRIDGE_TOKEN` / `CLAUDE_CLI_MODEL` | `http://host.docker.internal:8765` / – / CLI default | Claude Code CLI bridge |
 | `SOC_CATALOG_PATH` / `CATALOG_FETCH_ENABLED` | `catalog/schema-catalog.md` / `true` | Schema catalog file, and whether pulling from learn.microsoft.com is allowed |
 | `OLLAMA_URL` / `OLLAMA_MODEL` / `OLLAMA_IS_LOCAL` | `http://host.docker.internal:11434` / `llama3.1:8b` / `true` | Ollama |
+| `OLLAMA_NUM_CTX` / `OLLAMA_THINK` | `8192` / `false` | Ollama context window (tokens) and reasoning mode (qwen3, deepseek-r1) |
 
 </details>
 
@@ -205,6 +209,7 @@ Every folder has its own `README.md` describing its files.
 | 🎫 [docs/tickets.md](docs/tickets.md) | Ticket templates, the template editor, the SOC standard template, placeholders |
 | ➕ [docs/followups.md](docs/followups.md) | Follow-up logs and questions after the first analysis |
 | 🤖 [docs/llm.md](docs/llm.md) | LLM providers, external-LLM switches, exactly what data is sent |
+| 🪟 [docs/windows.md](docs/windows.md) | Running on Windows with Docker Desktop and a local Ollama model on an NVIDIA GPU |
 | 🧩 [docs/adding-an-llm.md](docs/adding-an-llm.md) | How to add another LLM provider |
 | 📝 [CHANGELOG.md](CHANGELOG.md) | Notable changes by date |
 

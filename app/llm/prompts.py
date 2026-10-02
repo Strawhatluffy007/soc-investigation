@@ -110,7 +110,8 @@ def build_prompt(profile: CustomerProfile, raw_log: str, context: str, rules_res
     parts = [
         f"# Customer: {profile.name}",
         "## Customer profile (customer.md)", customer_md,
-        "## Available tables and columns (use only these)", _schema_text(profile, mapped),
+        "## Available tables and columns (use only these)",
+        _schema_text(profile, mapped, min(40_000, max_context_chars // 3)),
         "## Deterministic pre-analysis (may be incomplete)", json.dumps(hints, indent=1),
         "## Analyst context", f"<analyst_context>\n{scrub_secrets(context or '(none)')}\n</analyst_context>",
         "## Raw log" + (" (truncated)" if truncated else ""), f"<untrusted_log>\n{log}\n</untrusted_log>",

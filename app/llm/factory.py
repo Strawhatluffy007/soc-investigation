@@ -49,7 +49,8 @@ def build_provider_for(settings: Settings, store: LLMConfigStore, p: str) -> LLM
     if s.id == "ollama":
         from app.llm.ollama import OllamaProvider
         return OllamaProvider(opts.get("base_url") or settings.ollama_url, model or settings.ollama_model,
-                              settings.ollama_is_local, settings.llm_timeout)
+                              settings.ollama_is_local, settings.llm_timeout,
+                              num_ctx=settings.ollama_num_ctx, think=settings.ollama_think)
     from app.llm.openai_compat import OpenAICompatProvider
     return OpenAICompatProvider(s.id, s.label, opts.get("base_url") or s.base_url, store.key(s.id),
                                 model or s.default_model, settings.llm_timeout, s.key_env)

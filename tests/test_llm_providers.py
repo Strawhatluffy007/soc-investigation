@@ -3,6 +3,7 @@ import stat
 
 import httpx
 
+from app.llm.ollama import OllamaProvider
 from tests.test_api import make_client
 
 
@@ -100,3 +101,17 @@ def test_pick_llm_per_run(customers_dir, tmp_path, monkeypatch):
     assert r.status_code == 400
     r = c.post("/api/customers/fabrikam/investigations", data={**form, "llm_provider": "gemini"})
     assert r.status_code == 400 and "does not permit" in r.json()["detail"]
+
+
+def test_ollama_sends_context_window_and_strips_thinking(monkeypatch):
+    sent = {}
+
+    def fake_post(url, json, timeout):
+        sent.update(json)
+        return httpx.Response(200, json={"message": {"content": '<think>hmm</think>\n{"event_summary": "x"}'}},
+                              request=httpx.Request("POST", url))
+
+    monkeypatch.setattr(httpx, "post", fake_post)
+    out = OllamaProvider("http://h:11434/", "qwen3:8b", True, 30, num_ctx=12288).analyze("sys", "prompt", {})
+    assert out == {"event_summary": "x"}
+    assert sent["options"]["num_ctx"] == 12288 and sent["think"] is False and sent["model"] == "qwen3:8b"

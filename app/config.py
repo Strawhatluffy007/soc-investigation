@@ -59,6 +59,8 @@ class Settings:
     ollama_url: str
     ollama_model: str
     ollama_is_local: bool
+    ollama_num_ctx: int
+    ollama_think: bool
 
     extra: dict = field(default_factory=dict)
 
@@ -97,4 +99,6 @@ def load_settings() -> Settings:
         ollama_url=_str("OLLAMA_URL", "http://host.docker.internal:11434"),
         ollama_model=_str("OLLAMA_MODEL", "llama3.1:8b"),
         ollama_is_local=_bool("OLLAMA_IS_LOCAL", True),
+        ollama_num_ctx=_int("OLLAMA_NUM_CTX", 8192),
+        ollama_think=_bool("OLLAMA_THINK", False),
     )

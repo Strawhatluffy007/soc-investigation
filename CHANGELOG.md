@@ -24,6 +24,17 @@ Newest first · dates are `YYYY-MM-DD` · format inspired by [Keep a Changelog](
 
 ## 🚧 [Unreleased]
 
+### ✨ Added
+
+- 🪟 **Windows support:** `docker-compose.windows.yml` (Docker Desktop override) and [docs/windows.md](docs/windows.md), which covers Docker Desktop and a local Ollama model on an NVIDIA GPU.
+- 🦙 **Ollama settings:** `OLLAMA_NUM_CTX` sets the context window. Ollama's small default silently cut long prompts. `OLLAMA_THINK` (default off) controls the reasoning mode of models such as qwen3, and leftover `<think>` blocks are stripped.
+- `.gitattributes` keeps LF line endings on Windows checkouts.
+- `tzdata` is installed on Windows, for UK time in tickets.
+
+### 🔧 Changed
+
+- The customer schema in the LLM prompt is limited to a third of `LLM_MAX_CONTEXT_CHARS`, so it shrinks along with the other limits for small local models.
+
 ### 📚 Docs
 
 - 🎨 Restyled the README with a logo, badges, Mermaid workflow and architecture diagrams, collapsible sections and callouts.
