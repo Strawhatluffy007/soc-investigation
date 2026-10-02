@@ -53,3 +53,16 @@ class AnthropicProvider(LLMProvider):
             return json.loads(text)
         except json.JSONDecodeError as e:
             raise LLMError("Claude returned invalid JSON") from e
+
+    def test(self) -> str:
+        """Check the key without spending tokens."""
+        a = self._anthropic
+        try:
+            self.client.models.list(limit=1)
+        except a.AuthenticationError as e:
+            raise LLMError("Anthropic rejected the API key") from e
+        except a.APIConnectionError as e:
+            raise LLMError("Could not reach the Anthropic API") from e
+        except a.APIStatusError as e:
+            raise LLMError(f"Anthropic API error {e.status_code}") from e
+        return "Anthropic API accepted the key."

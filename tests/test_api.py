@@ -25,7 +25,7 @@ def test_end_to_end(client, tmp_path):
     assert client.get("/healthz").json() == {"ok": True}
     r = client.get("/")
     assert r.status_code == 200 and "Content-Security-Policy" in r.headers
-    assert {c["id"] for c in client.get("/api/customers").json()} == {"contoso", "fabrikam"}
+    assert {c["id"] for c in client.get("/api/customers").json()} == {"contoso", "fabrikam", "northwind", "tailspin"}
 
     r = client.post("/api/customers/contoso/investigations",
                     data={"title": "Failed admin sign-in", "context": "user reported nothing"},
@@ -84,7 +84,7 @@ class FakeExternal(LLMProvider):
 
 def test_external_llm_gates(customers_dir, tmp_path, monkeypatch):
     from app.llm import factory
-    monkeypatch.setattr(factory, "build_provider", lambda s: FakeExternal())
+    monkeypatch.setattr(factory, "build_provider", lambda *a: FakeExternal())
     c = make_client(customers_dir, tmp_path, llm_provider="fake", llm_allow_external=True)
     raw = example("contoso", "failed-signin.json").replace('"Location"', '"password": "Hunter2!!", "Location"')
     # needs explicit confirmation
@@ -138,3 +138,28 @@ def test_rename_customer_and_manage_files(client, customers_dir):
     assert client.delete(base + "/files/template").status_code == 200
     assert client.get(base + "/files/template").json()["source"] == "default"
     assert client.delete(base + "/files/schema?filename=missing.md").status_code == 404
+
+
+def test_external_llm_switches(tmp_path):
+    from app.config import load_settings
+    from app.llm.factory import LLMGate
+    from app.customers.store import CustomerProfile
+    import os
+    os.environ.update(LLM_PROVIDER="anthropic", ANTHROPIC_API_KEY="x", LLM_ALLOW_EXTERNAL="true")
+    try:
+        gate = LLMGate(load_settings(), state_file=tmp_path / "settings.json")
+    finally:
+        for k in ("LLM_PROVIDER", "ANTHROPIC_API_KEY", "LLM_ALLOW_EXTERNAL"):
+            os.environ.pop(k, None)
+    assert gate.external_enabled and gate.allowed(None)[0]
+    gate.set_external(False)
+    ok, reason = gate.allowed(None)
+    assert not ok and "switched off" in reason
+    assert gate.status()["external_switch"] is False
+    gate.set_external(True)
+    assert gate.allowed(None)[0]
+    import dataclasses; gate.settings = dataclasses.replace(gate.settings, llm_allow_external=False)
+    import pytest
+    from app.llm.base import LLMError
+    with pytest.raises(LLMError):
+        gate.set_external(True)

@@ -14,7 +14,7 @@ It works fully offline. An LLM (your Claude Pro subscription via the Claude Code
 
 ```bash
 cp .env.example .env          # defaults: localhost only, no LLM
-cp -r samples/customers/contoso samples/customers/fabrikam customers/   # optional sample data
+cp -r samples/customers/*/ customers/   # optional: 4 fictional sample customers
 docker compose up -d --build
 # open http://127.0.0.1:8090
 docker compose logs --tail 50 soc
@@ -61,7 +61,7 @@ app/customers/     customer.md + schemas/*.md parser → TableSchema (fields + r
 app/investigation/ parser (JSON/CSV/KV/text) → classifier (playbooks) → table mapping → engine
 app/observables/   IOC/entity extraction (defang-aware, key-aware, internal/external IP tags)
 app/kql/           generator (role-based query builders) and local validator
-app/llm/           provider interface: none, claude_pro (Claude Code CLI bridge), anthropic, ollama; gates and prompts
+app/llm/           providers (registry.py): Claude Pro / ChatGPT login via host bridge, Anthropic, OpenAI, Gemini, any OpenAI-compatible API, Ollama; gates and prompts
 app/tickets/       {{placeholder}} renderer with Unknown handling and secret redaction
 app/storage/       JSON file per investigation under data/investigations/<customer>/
 app/audit.py       JSONL audit log (actions and metadata only, never log content)
@@ -69,7 +69,7 @@ app/catalog/       schema catalog: pull from Microsoft Learn, categories, per-cu
 bridge/            host-side HTTP bridge to the Claude Code CLI (+ systemd unit)
 catalog/           schema-catalog.md (all schemas, tables and columns)
 customers/         live customer data (git-ignored except _template/)
-samples/customers/ fictional sample customers (Contoso, Fabrikam), also used by the tests
+samples/customers/ fictional sample customers (Contoso, Fabrikam, Northwind, Tailspin), also used by the tests
 .claude/           Claude Code agents and skills for developing this project
 ```
 
@@ -89,7 +89,7 @@ To teach the engine a new event type, add an entry to `app/investigation/playboo
 | `SOC_UID` / `SOC_GID` | `1000` | Container user; must be able to write `./data` and `./customers` |
 | `SOC_MAX_UPLOAD_BYTES` | `5242880` | Upload size limit |
 | `SOC_MAX_LOG_CHARS` | `2000000` | Pasted log size limit |
-| `LLM_PROVIDER` | `none` | `none` \| `claude_pro` \| `anthropic` \| `ollama` |
+| `LLM_PROVIDER` | `none` | Default provider: `none` \| `claude_pro` \| `chatgpt` \| `anthropic` \| `openai` \| `gemini` \| `openai_compatible` \| `ollama`. Can be changed in **LLM settings** and per investigation |
 | `LLM_ALLOW_EXTERNAL` | `false` | Global kill switch for external LLMs |
 | `LLM_TIMEOUT_SECONDS` | `240` | Per-request LLM timeout |
 | `LLM_MAX_LOG_CHARS` / `LLM_MAX_CONTEXT_CHARS` | `60000` / `120000` | Truncation before sending to an LLM |
@@ -102,7 +102,8 @@ To teach the engine a new event type, add an entry to `app/investigation/playboo
 
 - [docs/customers.md](docs/customers.md): adding customers, schema format, field roles, KQL validation
 - [docs/tickets.md](docs/tickets.md): ticket templates and placeholders
-- [docs/llm.md](docs/llm.md): configuring Claude (API or local CLI) and Ollama, and what data is sent
+- [docs/llm.md](docs/llm.md): LLM providers (login, API key, local), the external-LLM switches, and what data is sent
+- [docs/adding-an-llm.md](docs/adding-an-llm.md): how to add another LLM provider
 
 ## Security notes
 

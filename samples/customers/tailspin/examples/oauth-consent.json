@@ -1,0 +1,14 @@
+{
+  "Timestamp": "2026-10-01T15:08:27Z",
+  "ActionType": "Consent to application.",
+  "Application": "Microsoft 365",
+  "AccountDisplayName": "Priya Nair",
+  "AccountUpn": "p.nair@tailspintoys.com",
+  "AccountObjectId": "6f1c2d3e-4a5b-4c6d-8e9f-0a1b2c3d4e5f",
+  "IPAddress": "198.51.100.23",
+  "CountryCode": "NL",
+  "ObjectName": "PDF Signer Pro",
+  "ObjectType": "Application",
+  "RawEventData": "{\"ConsentContext.IsAdminConsent\":\"False\",\"Permissions\":\"Mail.Read Mail.Send Files.ReadWrite.All offline_access\",\"AppPublisher\":\"unverified\",\"ReplyUrl\":\"https://pdfsigner-pro.example/auth/callback\"}",
+  "UserAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0 Safari/537.36"
+}

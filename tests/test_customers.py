@@ -45,3 +45,14 @@ def test_create_customer_from_template(store):
     with pytest.raises(InputError):
         store.create("Northwind Traders")
     assert "_template" not in [c["id"] for c in store.list()]
+
+
+def test_all_sample_customers_load_cleanly():
+    from pathlib import Path
+    from app.customers.store import CustomerStore
+    root = Path(__file__).resolve().parents[1]
+    st = CustomerStore(root / "samples" / "customers", root / "templates" / "incident-ticket.md")
+    for cid in ("contoso", "fabrikam", "northwind", "tailspin"):
+        p = st.load(cid)
+        assert p.tables and not p.warnings, cid
+        assert (root / "samples" / "customers" / cid / "examples").iterdir()

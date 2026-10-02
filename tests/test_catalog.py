@@ -124,10 +124,10 @@ def test_apply_rejects_bad_input(store, cat_path):
 
 
 def test_set_setting_adds_section(store, customers_dir):
-    store.create("Northwind")
-    store.set_setting("northwind", "schema_scope", "selected")
-    store.set_setting("northwind", "schema_scope", "all")
-    text = (customers_dir / "northwind" / "customer.md").read_text()
+    store.create("Wingtip")
+    store.set_setting("wingtip", "schema_scope", "selected")
+    store.set_setting("wingtip", "schema_scope", "all")
+    text = (customers_dir / "wingtip" / "customer.md").read_text()
     assert text.count("schema_scope") == 1 and "- schema_scope: all" in text
 
 

@@ -80,8 +80,10 @@ async function boot() {
   $("btnConfig").addEventListener("click", () => showConfig());
   $("btnNewCustomer").addEventListener("click", showNewCustomer);
   $("btnCatalog").addEventListener("click", showCatalog);
+  $("btnLLM").addEventListener("click", () => showLLMSettings());
   $("invSearch").addEventListener("input", renderInvList);
   $("invStatus").addEventListener("change", renderInvList);
+  $("extToggle").addEventListener("change", toggleExternal);
   try {
     S.status = await api("/status");
   } catch (e) {
@@ -120,9 +122,19 @@ function renderLLMBadge() {
     b.title = llm.external ? "Logs are only sent when you choose LLM analysis and confirm." : "";
   } else {
     b.className = "badge off";
-    b.textContent = "LLM disabled for this customer";
+    b.textContent = llm.blocked_by === "env" ? "External LLM disabled (server config)"
+      : llm.blocked_by === "switch" ? "External LLM off · local analysis only"
+      : llm.blocked_by === "customer" ? "External LLM blocked for " + S.customer.name : "LLM not ready";
     b.title = llm.reason;
   }
+  const sw = $("extSwitch"), t = $("extToggle");
+  const anyExternal = (llm.choices || []).some((c) => c.external && c.blocked_by !== "config");
+  sw.classList.toggle("hidden", !((llm.configured && llm.external) || anyExternal));
+  t.checked = llm.allow_external;
+  t.disabled = !llm.env_allow_external;
+  sw.classList.toggle("disabled", t.disabled);
+  sw.title = t.disabled ? "Locked off: LLM_ALLOW_EXTERNAL=false in the server .env"
+    : "Turn sending data to the external LLM on or off for everyone (audited)";
   const banner = $("banner");
   if (S.customer && S.customer.warnings && S.customer.warnings.length) {
     banner.className = "banner warn";
@@ -199,25 +211,70 @@ function card(title, ...body) {
 // ------------------------------------------------------------------ new investigation
 function llmChoice(prefix) {
   const llm = S.customer.llm;
+  const choices = llm.choices || [];
+  let saved = "";
+  try { saved = localStorage.getItem("llmPick") || ""; } catch (e) { /* storage blocked */ }
+  const pickable = choices.filter((c) => c.available);
+  const start = (pickable.find((c) => c.id === saved) || pickable.find((c) => c.default) || pickable[0] || {}).id || "";
+  const pick = h("select", { class: "llm-pick" }, choices.map((c) => h("option",
+    { value: c.id, disabled: !c.available, selected: c.id === start, title: c.reason || "" },
+    `${c.label}${c.default ? " (default)" : ""} · ${c.external ? "external" : "local"}${c.available ? "" : " · " + shortReason(c)}`)));
+  const cur = () => choices.find((c) => c.id === pick.value) || {};
+
   const wrap = h("div", { class: "llm-choice" });
   const rules = h("input", { type: "radio", name: prefix + "mode", value: "rules", checked: true });
-  const withLLM = h("input", { type: "radio", name: prefix + "mode", value: "llm", disabled: !llm.available });
+  const withLLM = h("input", { type: "radio", name: prefix + "mode", value: "llm", disabled: !pickable.length });
   const confirm = h("input", { type: "checkbox" });
+  const dest = h("span");
   const warn = h("div", { class: "external-warn hidden" },
     h("strong", {}, "External processing. "),
     "The log (secrets redacted, truncated to the configured limit), the analyst context and " + S.customer.name +
-    "'s customer profile will be sent to " + llm.provider + " (" + llm.model + "). ",
+    "'s customer profile will be sent to ", dest, ". ",
     h("label", { class: "inline" }, confirm, " I confirm this data may leave this system."));
-  const sync = () => warn.classList.toggle("hidden", !(withLLM.checked && llm.external));
+  const sync = () => {
+    const c = cur();
+    dest.textContent = `${c.label || "the LLM"} (${c.model || ""})`;
+    warn.classList.toggle("hidden", !(withLLM.checked && c.external));
+    pick.disabled = !withLLM.checked;
+  };
+  pick.addEventListener("change", () => {
+    confirm.checked = false;  // confirmation is per destination
+    try { localStorage.setItem("llmPick", pick.value); } catch (e) { /* storage blocked */ }
+    sync();
+  });
   rules.addEventListener("change", sync);
   withLLM.addEventListener("change", sync);
+  const blocked = llm.blocked_by === "customer" || choices.some((c) => c.blocked_by === "customer");
   wrap.append(
     h("label", { class: "inline" }, rules, " Local rules engine (no data leaves this system)"),
-    h("label", { class: "inline" + (llm.available ? "" : " disabled") }, withLLM,
-      llm.configured ? ` Rules + LLM (${llm.provider}${llm.external ? ", external" : ", local"})` : " Rules + LLM (not configured)"),
-    llm.available ? null : h("div", { class: "muted small" }, llm.reason),
+    h("div", { class: "row" },
+      h("label", { class: "inline" + (pickable.length ? "" : " disabled") }, withLLM, " Rules + LLM:"),
+      pick,
+      h("button", { class: "small ghost", onclick: () => showLLMSettings() }, "LLM settings")),
+    pickable.length ? null : h("div", { class: "muted small" }, llm.reason || "No LLM is ready. Set one up in LLM settings."),
+    blocked ? allowCustomerButton() : null,
     warn);
-  return { el: wrap, get: () => ({ use_llm: withLLM.checked, confirm_external: confirm.checked }) };
+  sync();
+  return { el: wrap, get: () => ({ use_llm: withLLM.checked, confirm_external: confirm.checked,
+    llm_provider: withLLM.checked ? pick.value : "", external: withLLM.checked && !!cur().external }) };
+}
+
+function shortReason(c) {
+  return { config: "not set up", env: "blocked by server", switch: "external off", customer: "blocked for customer" }[c.blocked_by] || "unavailable";
+}
+
+function allowCustomerButton() {
+  const b = h("button", { class: "small" }, "Allow external LLM for " + S.customer.name);
+  b.addEventListener("click", async () => {
+    if (!confirm(`Allow ${S.customer.name}'s logs to be sent to external LLMs when you choose LLM analysis and confirm?\n\nThis sets allow_external_llm: true in ${S.customer.name}'s customer.md (audited).`)) return;
+    try {
+      S.customer = await api(custPath() + "/external-llm", { method: "PUT", json: { enabled: true } });
+      renderLLMBadge();
+      toast("External LLM allowed for " + S.customer.name);
+      if (S.inv) showInvestigation(S.inv); else showNewForm();
+    } catch (e) { toast(e.message, "error"); }
+  });
+  return h("div", { class: "row" }, b);
 }
 
 function showNewForm() {
@@ -233,13 +290,14 @@ function showNewForm() {
     const m = mode.get();
     if (!log.value.trim() && !file.files.length) return toast("Paste a log or choose a file.", "error");
     if (file.files.length && file.files[0].size > lim.upload_bytes) return toast("File exceeds the upload limit.", "error");
-    if (m.use_llm && S.customer.llm.external && !m.confirm_external) return toast("Confirm external processing or choose local analysis.", "error");
+    if (m.use_llm && m.external && !m.confirm_external) return toast("Confirm external processing or choose local analysis.", "error");
     const fd = new FormData();
     fd.append("title", title.value);
     fd.append("raw_log", log.value);
     fd.append("context", ctx.value);
     fd.append("use_llm", m.use_llm);
     fd.append("confirm_external", m.confirm_external);
+    fd.append("llm_provider", m.llm_provider);
     if (file.files.length) fd.append("file", file.files[0]);
     submit.disabled = true;
     submit.textContent = m.use_llm ? "Analysing with LLM… (can take a minute)" : "Analysing…";
@@ -367,10 +425,11 @@ function reanalyseBox() {
   const btn = h("button", {}, "Re-analyse");
   btn.addEventListener("click", async () => {
     const m = mode.get();
-    if (m.use_llm && S.customer.llm.external && !m.confirm_external) return toast("Confirm external processing first.", "error");
+    if (m.use_llm && m.external && !m.confirm_external) return toast("Confirm external processing first.", "error");
     btn.disabled = true; btn.textContent = "Analysing…";
     try {
-      const inv = await api(invPath(S.inv.id) + "/analyze", { method: "POST", json: m });
+      const inv = await api(invPath(S.inv.id) + "/analyze", { method: "POST",
+        json: { use_llm: m.use_llm, confirm_external: m.confirm_external, llm_provider: m.llm_provider } });
       showInvestigation(inv);
       toast(inv.analysis.engine.error || "Analysis updated", inv.analysis.engine.error ? "error" : "");
     } catch (e) { toast(e.message, "error"); btn.disabled = false; btn.textContent = "Re-analyse"; }
@@ -464,12 +523,44 @@ const NEW_FILE_STUB = {
   example: () => "",
 };
 
+async function toggleExternal() {
+  const t = $("extToggle"), on = t.checked;
+  if (!on || confirm("Turn ON external LLM use? Customer logs can then be sent to " +
+      S.status.llm.provider + " when an analyst chooses LLM analysis and confirms.")) {
+    try {
+      S.status.llm = await api("/settings/external-llm", { method: "PUT", json: { enabled: on } });
+      if (S.customerId) await refreshCustomer();
+      toast("External LLM " + (on ? "enabled" : "disabled") + ".");
+    } catch (e) { toast(e.message, "error"); }
+  }
+  renderLLMBadge();
+  if (S.customerId && !S.inv && $("main").querySelector(".log-input")) showNewForm();
+}
+
 async function refreshCustomer() {
   S.customer = await api(custPath());
   renderLLMBadge();
   const sel = $("customerSelect");
   const opt = [...sel.options].find((o) => o.value === S.customerId);
   if (opt) opt.textContent = S.customer.name;
+}
+
+function extLLMRow(c) {
+  const box = h("input", { type: "checkbox" });
+  box.checked = c.allow_external_llm;
+  const g = c.llm || {};
+  box.addEventListener("change", async () => {
+    try {
+      S.customer = await api(custPath() + "/external-llm", { method: "PUT", json: { enabled: box.checked } });
+      renderLLMBadge();
+      toast(`External LLM ${box.checked ? "allowed" : "blocked"} for ${S.customer.name}.`);
+    } catch (e) { box.checked = !box.checked; toast(e.message, "error"); }
+  });
+  const note = !g.env_allow_external ? "Server config (LLM_ALLOW_EXTERNAL=false) blocks external LLM for all customers."
+    : !g.external_switch ? "The global External LLM switch in the header is off, so this has no effect until it is on."
+    : "Saved as allow_external_llm under ## Settings in customer.md.";
+  return h("div", {}, h("label", { class: "inline" }, box, "Allow external LLM for this customer"),
+    h("p", { class: "muted small" }, note));
 }
 
 async function showConfig(selectKey = "customer") {
@@ -490,7 +581,8 @@ async function showConfig(selectKey = "customer") {
   const details = card("Customer details",
     h("div", { class: "row" }, h("label", { class: "grow" }, "Display name", nameInput), rename),
     h("p", { class: "muted small" }, "Id: ", h("span", { class: "mono" }, c.id),
-      " (folder customers/" + c.id + "/). The id does not change, so existing investigations stay linked."));
+      " (folder customers/" + c.id + "/). The id does not change, so existing investigations stay linked."),
+    extLLMRow(c));
 
   // -- file editor
   const files = [["customer", "customer.md"], ["template", "templates/incident-ticket.md"]]
@@ -579,6 +671,173 @@ async function showConfig(selectKey = "customer") {
       h("div", { class: "row" }, picker, save, del, h("span", { class: "spacer" }), newKind, newName, add),
       status, editor)));
   await load(files.some(([k]) => k === selectKey) ? selectKey : "customer");
+}
+
+// ------------------------------------------------------------------ LLM settings
+const AUTH_GROUPS = [
+  ["login", "Sign in with a subscription (no API key)",
+    "Uses the plan you already pay for. The CLI runs on the Pi and is reached through the LLM bridge."],
+  ["api_key", "API key (pay per use)", "Keys entered here are stored on the Pi in data/secrets (mode 0600), never shown again and never put in tickets or logs. A key set in .env takes priority."],
+  ["local", "Local model", "Nothing leaves your network if the endpoint is local."],
+  ["none", "Off", ""],
+];
+
+async function afterLLMChange(llm) {
+  S.status.llm = llm;
+  if (S.customerId) await refreshCustomer(); else renderLLMBadge();
+}
+
+async function showLLMSettings() {
+  S.inv = null; renderInvList();
+  let data, login = null;
+  try { data = await api("/llm/providers"); } catch (e) { toast(e.message, "error"); return; }
+  S.status.llm = data.llm;
+  renderLLMBadge();
+  const llm = data.llm;
+  const page = h("div", { class: "page" }, h("h2", {}, "LLM settings"));
+
+  const ext = llm.env_allow_external
+    ? (llm.external_switch ? "External LLM use is ON (switch in the top bar)." : "External LLM use is OFF (switch in the top bar), so only local analysis runs.")
+    : "External LLM use is locked off by LLM_ALLOW_EXTERNAL=false in .env.";
+  page.append(card("Active provider",
+    h("p", {}, h("strong", {}, (data.providers.find((p) => p.id === data.active) || {}).label || data.active),
+      llm.available ? h("span", { class: "tag internal" }, "ready") : h("span", { class: "tag external" }, "not ready")),
+    llm.available ? null : h("p", { class: "warn-text small" }, llm.reason),
+    h("p", { class: "muted small" }, ext + " Customers can still opt out in Customer config. Logs are only sent when an analyst picks Rules + LLM and confirms.")));
+
+  const loginBox = h("div", { class: "muted small" }, "Checking sign-in status…");
+  for (const [auth, title, note] of AUTH_GROUPS) {
+    const rows = data.providers.filter((p) => p.auth === auth);
+    const c = card(title, note ? h("p", { class: "muted small" }, note) : null);
+    if (auth === "login") c.append(loginBox);
+    for (const p of rows) c.append(providerRow(p, data.active));
+    page.append(c);
+  }
+  $("main").replaceChildren(page);
+
+  try {
+    login = await api("/llm/login-status");
+    loginBox.textContent = "";
+    for (const [cli, label] of [["claude", "Claude Code CLI"], ["codex", "Codex CLI (ChatGPT)"]]) {
+      const st = login[cli] || {};
+      loginBox.append(h("div", {}, label + ": ",
+        !st.installed ? h("span", { class: "warn-text" }, "not installed")
+          : st.logged_in ? h("span", { class: "tag internal" }, "signed in" + (st.method ? " · " + st.method : ""))
+          : h("span", { class: "tag external" }, "not signed in")));
+    }
+  } catch (e) { loginBox.textContent = e.message; loginBox.className = "warn-text small"; }
+}
+
+function providerRow(p, active) {
+  const row = h("div", { class: "prov" + (p.id === active ? " active" : "") });
+  const use = h("button", { class: p.id === active ? "primary" : "" }, p.id === active ? "In use" : "Use this");
+  use.disabled = p.id === active;
+  use.addEventListener("click", async () => {
+    if (p.external && !confirm(`Switch the LLM to ${p.label}? Customer logs will be sent to ${p.vendor} when an analyst chooses LLM analysis and confirms.`)) return;
+    try {
+      await afterLLMChange(await api("/llm/active", { method: "PUT", json: { provider: p.id } }));
+      toast("LLM provider: " + p.label);
+      showLLMSettings();
+    } catch (e) { toast(e.message, "error"); }
+  });
+  const head = h("div", { class: "prov-head" },
+    h("strong", {}, p.label), p.vendor ? h("span", { class: "muted small" }, p.vendor) : null,
+    p.auth !== "none" ? h("span", { class: "tag " + (p.external ? "external" : "internal") }, p.external ? "external" : "local") : null,
+    h("div", { class: "spacer" }), use);
+  row.append(head);
+  if (p.auth === "none") return row;
+
+  const fields = h("div", { class: "row" });
+  const model = h("input", { value: p.model, placeholder: p.default_model || "default", maxlength: "120", class: "grow-input" });
+  const base = p.base_url_editable ? h("input", { value: p.effective_base_url, placeholder: p.base_url, class: "grow-input" }) : null;
+  const saveOpts = h("button", {}, "Save");
+  saveOpts.addEventListener("click", async () => {
+    const json = { model: model.value };
+    if (base) json.base_url = base.value;
+    try {
+      await afterLLMChange(await api("/llm/providers/" + p.id, { method: "PUT", json }));
+      toast(p.label + " settings saved");
+    } catch (e) { toast(e.message, "error"); }
+  });
+  fields.append(h("label", { class: "grow" }, "Model" + (p.models_hint ? " (" + p.models_hint + ")" : ""), model));
+  if (base) fields.append(h("label", { class: "grow" }, "Endpoint URL", base));
+  fields.append(saveOpts);
+  row.append(fields);
+
+  const actions = h("div", { class: "row" });
+  const result = h("span", { class: "small" });
+  if (p.auth === "api_key") {
+    const src = p.key_source === "env" ? `Key set by ${p.key_env} in .env`
+      : p.key_source === "saved" ? "Key saved" : "No key yet";
+    actions.append(h("span", { class: "tag " + (p.key_source ? "internal" : "external") }, src));
+    if (p.key_source !== "env") {
+      const key = h("input", { type: "password", placeholder: p.key_source ? "Replace key" : "Paste API key", autocomplete: "off", class: "grow-input" });
+      const saveKey = h("button", {}, "Save key");
+      saveKey.addEventListener("click", async () => {
+        try {
+          const r = await api("/llm/providers/" + p.id + "/key", { method: "PUT", json: { api_key: key.value } });
+          key.value = "";
+          await afterLLMChange(r.llm);
+          toast(p.label + " key saved");
+          showLLMSettings();
+        } catch (e) { toast(e.message, "error"); }
+      });
+      actions.append(key, saveKey);
+      if (p.key_source === "saved") {
+        const del = h("button", {}, "Remove key");
+        del.addEventListener("click", async () => {
+          if (!confirm("Remove the saved " + p.label + " key?")) return;
+          try {
+            const r = await api("/llm/providers/" + p.id + "/key", { method: "DELETE" });
+            await afterLLMChange(r.llm);
+            showLLMSettings();
+          } catch (e) { toast(e.message, "error"); }
+        });
+        actions.append(del);
+      }
+    }
+    if (p.docs) actions.append(safeLink(p.docs, "Get a key"));
+  }
+  if (p.auth === "login") {
+    actions.append(h("span", { class: "muted small" }, "Sign in on the Pi: "), h("code", { class: "mono" }, p.login_cmd));
+    if (p.cli === "codex") {
+      const signIn = h("button", {}, "Sign in from browser");
+      signIn.addEventListener("click", () => deviceLogin(p, result));
+      actions.append(signIn);
+    }
+  }
+  const test = h("button", {}, "Test");
+  test.title = "Checks the key or sign-in. Sends no customer data and no prompt.";
+  test.addEventListener("click", async () => {
+    result.className = "small muted"; result.textContent = "Testing…";
+    try {
+      const r = await api("/llm/providers/" + p.id + "/test", { method: "POST" });
+      result.className = "small"; result.style.color = "var(--ok)"; result.textContent = r.message;
+    } catch (e) { result.className = "small err"; result.style.color = ""; result.textContent = e.message; }
+  });
+  actions.append(test, result);
+  row.append(actions);
+  return row;
+}
+
+async function deviceLogin(p, out) {
+  out.className = "small muted"; out.textContent = "Starting sign-in…";
+  try {
+    let st = await api("/llm/providers/" + p.id + "/login", { method: "POST" });
+    if (!st.code) {
+      out.className = "small err";
+      out.textContent = st.output ? "Sign-in did not start: " + st.output.slice(-200) : "No sign-in code yet. Run " + p.login_cmd + " on the Pi instead.";
+      return;
+    }
+    out.className = "small";
+    out.replaceChildren("Open ", safeLink(st.url, st.url), " and enter code ", h("strong", { class: "mono" }, st.code), ". Waiting…");
+    for (let i = 0; i < 180 && st.running; i++) {
+      await new Promise((r) => setTimeout(r, 5000));
+      st = await api("/llm/providers/" + p.id + "/login");
+    }
+    if (!st.running && st.exit_code === 0) { toast("Signed in to " + p.label); showLLMSettings(); }
+    else if (!st.running) { out.className = "small err"; out.textContent = "Sign-in failed or expired. Try again."; }
+  } catch (e) { out.className = "small err"; out.textContent = e.message; }
 }
 
 // ------------------------------------------------------------------ schema catalog

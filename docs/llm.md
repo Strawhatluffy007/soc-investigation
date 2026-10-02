@@ -8,23 +8,36 @@ The deterministic rules engine always runs. An LLM, if enabled, adds to it:
 
 LLM queries go through the same local schema validation and are labelled **LLM-suggested**. If the LLM call fails, you get the rules result plus the error message.
 
-## Providers (`LLM_PROVIDER`)
+## Providers
 
-| Value | What it does | External? |
-|---|---|---|
-| `none` (default) | Rules engine only | – |
-| `anthropic` | Claude API via the Anthropic SDK (`ANTHROPIC_API_KEY`, `ANTHROPIC_MODEL`, `ANTHROPIC_EFFORT`) | **Yes** |
-| `claude_pro` (alias `claude_cli`) | Claude Pro/Max subscription through the Claude Code CLI on the host (no API key) via `bridge/claude_bridge.py` | **Yes** (inference runs at Anthropic) |
-| `ollama` | Local model via Ollama `/api/chat` | No, unless `OLLAMA_IS_LOCAL=false` |
+Pick the active provider, models, endpoints and API keys in the web UI: **LLM settings** in the sidebar. `LLM_PROVIDER` in `.env` is only the starting choice until you pick one there. The choice is saved in `data/llm.json`.
+
+| Id | How it signs in | What it does | External? |
+|---|---|---|---|
+| `none` | – | Rules engine only | – |
+| `claude_pro` (alias `claude_cli`) | **Login**: `claude auth login` on the Pi | Claude Pro/Max subscription through the Claude Code CLI, via `bridge/claude_bridge.py` | **Yes** |
+| `chatgpt` | **Login**: `codex login --device-auth` on the Pi, or **Sign in from browser** in LLM settings | ChatGPT Plus/Pro subscription through the OpenAI Codex CLI (`codex exec`, read-only sandbox), via the same bridge | **Yes** |
+| `anthropic` | **API key** `ANTHROPIC_API_KEY` | Claude API via the Anthropic SDK | **Yes** |
+| `openai` | **API key** `OPENAI_API_KEY` | OpenAI Chat Completions with JSON-schema output | **Yes** |
+| `gemini` | **API key** `GEMINI_API_KEY` | Google Gemini through its OpenAI-compatible endpoint | **Yes** |
+| `openai_compatible` | **API key** `OPENAI_COMPAT_API_KEY` + endpoint URL | OpenRouter, Groq, Mistral, DeepSeek or any other `/chat/completions` API | **Yes** |
+| `ollama` | – | Local model via Ollama `/api/chat` | No, unless `OLLAMA_IS_LOCAL=false` |
+
+**API keys.** A key in `.env` always wins and can't be changed from the UI. A key pasted in the UI is stored in `data/secrets/llm-keys.json` (mode 0600, git-ignored). The API never returns a key, and the audit log records only that a key was set or removed (`settings.llm_key.set` / `.delete`). Every provider switch and settings change is audited too.
+
+**Test** in LLM settings checks the key (by listing models) or the CLI sign-in. It sends no prompt and no customer data.
+
+**ChatGPT login.** Install the Codex CLI on the Pi (official release binary `codex-aarch64-unknown-linux-musl` from github.com/openai/codex, or `npm i -g @openai/codex`) into `~/.local/bin/codex`. Then either run `codex login --device-auth`, or press **Sign in from browser**, which shows a link and a one-time code. The bridge removes `OPENAI_API_KEY` from the CLI's environment, so it always uses your ChatGPT plan. Set `Environment=CODEX_BIN=%h/.local/bin/codex` in the bridge's systemd unit, then restart it with `systemctl --user daemon-reload && systemctl --user restart claude-bridge`.
 
 ### Data-sending gates
 
 For an external provider, every gate must allow it:
 
-1. `LLM_ALLOW_EXTERNAL=true` (global kill switch, default `false`).
-2. The customer doesn't set `allow_external_llm: false`.
-3. The analyst picks **Rules + LLM** for this run.
-4. The analyst ticks *"I confirm this data may leave this system"*.
+1. `LLM_ALLOW_EXTERNAL=true` (global kill switch, default `false`). This is the hard cap: when it is `false`, nothing in the UI can turn external use on.
+2. The **External LLM** switch in the header is on. It is stored in `data/settings.json` (default on), applies to everyone, takes effect immediately without a restart, and every change is audited (`settings.external_llm`). API: `PUT /api/settings/external-llm {"enabled": true|false}`.
+3. The customer doesn't set `allow_external_llm: false`. You can tick or untick **Allow external LLM for this customer** in Customer config → Customer details (audited as `customer.external_llm`; API `PUT /api/customers/<id>/external-llm`).
+4. The analyst picks **Rules + LLM** for this run.
+5. The analyst ticks *"I confirm this data may leave this system"*.
 
 The UI header shows whether an external LLM is available. Each investigation records `llm_used`, and every send is written to the audit log (provider, model and size; never content).
 
@@ -76,8 +89,8 @@ The bridge runs `claude -p` with no tools, no MCP servers, no settings and no se
 
 ## Adding a provider
 
-1. Subclass `app.llm.base.LLMProvider`: set `name` and `is_external`, and implement `analyze(system, prompt, schema) -> dict`.
-2. Register it in `app/llm/factory.py`.
+See [adding-an-llm.md](adding-an-llm.md). For any OpenAI-style API there is no code to write: use the
+**OpenAI-compatible API** entry, or add one `ProviderSpec` line to `app/llm/registry.py`.
 
 ## Using a Claude Pro subscription (no API key)
 

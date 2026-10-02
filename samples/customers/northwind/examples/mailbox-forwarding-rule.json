@@ -1,0 +1,11 @@
+{
+  "TimeGenerated": "2026-09-30T22:14:51Z",
+  "UserId": "j.ortega@northwindtraders.com",
+  "Operation": "New-InboxRule",
+  "OfficeWorkload": "Exchange",
+  "ResultStatus": "True",
+  "ClientIP": "192.0.2.211:51344",
+  "Parameters": "[{\"Name\":\"Name\",\"Value\":\"..\"},{\"Name\":\"ForwardTo\",\"Value\":\"invoices.northwind@outlook-mail.example\"},{\"Name\":\"SubjectContainsWords\",\"Value\":\"invoice;payment;remittance\"},{\"Name\":\"MarkAsRead\",\"Value\":\"True\"}]",
+  "OfficeObjectId": "j.ortega@northwindtraders.com\\..",
+  "UserAgent": "python-requests/2.32"
+}

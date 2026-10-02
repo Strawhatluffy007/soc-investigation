@@ -8,6 +8,7 @@ After=network-online.target
 [Service]
 EnvironmentFile=%h/claude/soc-investigation/.env.bridge
 Environment=CLAUDE_BIN=%h/.local/bin/claude
+Environment=CODEX_BIN=%h/.local/bin/codex
 ExecStart=/usr/bin/python3 %h/claude/soc-investigation/bridge/claude_bridge.py
 Restart=on-failure
 RestartSec=5

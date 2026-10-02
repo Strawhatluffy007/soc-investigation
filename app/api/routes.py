@@ -5,10 +5,11 @@ from __future__ import annotations
 
 import re
 import threading
+from dataclasses import asdict
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from app.audit import AuditLog
 from app.catalog.store import CatalogStore
@@ -17,7 +18,10 @@ from app.customers.store import CustomerProfile, CustomerStore
 from app.investigation.engine import analyze
 from app.kql.validator import validate_kql
 from app.llm.base import LLMError
-from app.llm.factory import LLMGate
+from app.llm.claude_cli import bridge_request
+from app.llm.config_store import ConfigError
+from app.llm.factory import LLMGate, build_provider_for
+from app.llm.registry import SPECS
 from app.security import InputError, clean_text, decode_upload
 from app.storage.investigations import SEVERITIES, STATUSES, InvestigationStore
 from app.tickets.render import render_ticket
@@ -40,6 +44,7 @@ class FileIn(BaseModel):
 class AnalyzeIn(BaseModel):
     use_llm: bool = False
     confirm_external: bool = False
+    llm_provider: str = Field(default="", max_length=40)
 
 
 class UpdateIn(BaseModel):
@@ -56,6 +61,23 @@ class UpdateIn(BaseModel):
 class SelectionIn(BaseModel):
     selection: dict[str, list[str]] = {}
     scope: str = "selected"
+
+
+class ToggleIn(BaseModel):
+    enabled: bool
+
+
+class ActiveLLMIn(BaseModel):
+    provider: str = Field(max_length=40)
+
+
+class LLMOptionsIn(BaseModel):
+    model: str | None = Field(default=None, max_length=120)
+    base_url: str | None = Field(default=None, max_length=300)
+
+
+class APIKeyIn(BaseModel):
+    api_key: str = Field(max_length=400)
 
 
 class KQLIn(BaseModel):
@@ -98,9 +120,10 @@ def build_router(settings: Settings) -> APIRouter:
         except KeyError:
             raise HTTPException(404, "Investigation not found")
 
-    def run_analysis(request: Request, prof: CustomerProfile, inv: dict, use_llm: bool, confirm: bool) -> dict:
+    def run_analysis(request: Request, prof: CustomerProfile, inv: dict, use_llm: bool, confirm: bool,
+                     provider_id: str = "") -> dict:
         try:
-            provider = gate.for_run(prof, use_llm, confirm)
+            provider = gate.for_run(prof, use_llm, confirm, provider_id)
         except LLMError as e:
             raise HTTPException(400, str(e))
         who = analyst(request)
@@ -121,6 +144,130 @@ def build_router(settings: Settings) -> APIRouter:
         return {"analyst": analyst(request), "auth": settings.auth_enabled, "llm": gate.status(),
                 "statuses": STATUSES, "severities": SEVERITIES[1:],
                 "limits": {"upload_bytes": settings.max_upload_bytes, "log_chars": settings.max_log_chars}}
+
+    # ------------------------------------------------------------ external LLM switch
+    @r.put("/settings/external-llm")
+    def set_external_llm(body: ToggleIn, request: Request):
+        try:
+            gate.set_external(body.enabled)
+        except LLMError as e:
+            raise HTTPException(400, str(e))
+        audit.record("settings.external_llm", analyst=analyst(request), enabled=body.enabled)
+        return gate.status()
+
+    @r.put("/customers/{cid}/external-llm")
+    def set_customer_external_llm(cid: str, body: ToggleIn, request: Request):
+        profile(cid)
+        customers.set_setting(cid, "allow_external_llm", "true" if body.enabled else "false")
+        audit.record("customer.external_llm", analyst=analyst(request), customer=cid, enabled=body.enabled)
+        prof = profile(cid)
+        return {**prof.to_dict(), "llm": gate.status(prof)}
+
+    # ------------------------------------------------------------ LLM providers
+    def bridge(method: str, path: str, body: dict | None = None) -> dict:
+        try:
+            return bridge_request(settings.claude_bridge_url, settings.claude_bridge_token, method, path, body)
+        except LLMError as e:
+            raise HTTPException(502, str(e))
+
+    def provider_spec(pid: str):
+        s = SPECS.get(pid)
+        if not s:
+            raise HTTPException(404, "Unknown provider")
+        return s
+
+    @r.get("/llm/providers")
+    def llm_providers():
+        store = gate.store
+        out = []
+        for s in SPECS.values():
+            opts = store.options(s.id)
+            out.append({**asdict(s), "external": s.auth in ("login", "api_key") or
+                        (s.id == "ollama" and not settings.ollama_is_local),
+                        "model": opts.get("model", ""), "effective_base_url": opts.get("base_url") or (
+                            settings.ollama_url if s.id == "ollama" else s.base_url),
+                        "key_source": store.key_source(s.id)})
+        return {"active": store.active, "providers": out, "llm": gate.status()}
+
+    @r.put("/llm/active")
+    def set_active_llm(body: ActiveLLMIn, request: Request):
+        provider_spec(body.provider)
+        old = gate.store.active
+        gate.store.set_active(body.provider)
+        gate.reload()
+        audit.record("settings.llm_provider", analyst=analyst(request), old=old, new=body.provider)
+        return gate.status()
+
+    @r.put("/llm/providers/{pid}")
+    def set_llm_options(pid: str, body: LLMOptionsIn, request: Request):
+        provider_spec(pid)
+        try:
+            gate.store.set_options(pid, body.model, body.base_url)
+        except ConfigError as e:
+            raise HTTPException(400, str(e))
+        gate.reload()
+        audit.record("settings.llm_options", analyst=analyst(request), provider=pid, model=body.model,
+                     base_url=body.base_url)
+        return gate.status()
+
+    @r.put("/llm/providers/{pid}/key")
+    def set_llm_key(pid: str, body: APIKeyIn, request: Request):
+        provider_spec(pid)
+        try:
+            gate.store.set_key(pid, body.api_key)
+        except ConfigError as e:
+            raise HTTPException(400, str(e))
+        gate.reload()
+        audit.record("settings.llm_key.set", analyst=analyst(request), provider=pid)  # never the key
+        return {"key_source": gate.store.key_source(pid), "llm": gate.status()}
+
+    @r.delete("/llm/providers/{pid}/key")
+    def delete_llm_key(pid: str, request: Request):
+        provider_spec(pid)
+        if not gate.store.delete_key(pid):
+            raise HTTPException(404, "No saved key for this provider")
+        gate.reload()
+        audit.record("settings.llm_key.delete", analyst=analyst(request), provider=pid)
+        return {"key_source": gate.store.key_source(pid), "llm": gate.status()}
+
+    @r.post("/llm/providers/{pid}/test")
+    def test_llm(pid: str, request: Request):
+        """Checks credentials without sending any customer data or prompt."""
+        s = provider_spec(pid)
+        if s.auth == "login":
+            st = bridge("GET", "/status").get(s.cli, {})
+            if not st.get("installed"):
+                raise HTTPException(400, f"The {s.cli} CLI is not installed on the host.")
+            if not st.get("logged_in"):
+                raise HTTPException(400, f"Not signed in. Run `{s.login_cmd}` on the Pi or use Sign in.")
+            return {"ok": True, "message": f"{s.label}: signed in" + (f" ({st['method']})" if st.get("method") else "") + "."}
+        if s.auth == "none":
+            return {"ok": True, "message": "Rules engine only; nothing to test."}
+        try:
+            prov = build_provider_for(settings, gate.store, pid)
+            msg = prov.test() if hasattr(prov, "test") else f"{s.label} is configured."
+        except LLMError as e:
+            raise HTTPException(400, str(e))
+        audit.record("settings.llm_test", analyst=analyst(request), provider=pid)
+        return {"ok": True, "message": msg}
+
+    @r.get("/llm/login-status")
+    def llm_login_status():
+        return bridge("GET", "/status")
+
+    @r.post("/llm/providers/{pid}/login")
+    def llm_login(pid: str, request: Request):
+        s = provider_spec(pid)
+        if s.cli != "codex":
+            raise HTTPException(400, f"Sign in to {s.label} on the Pi with: {s.login_cmd}")
+        audit.record("settings.llm_login.start", analyst=analyst(request), provider=pid)
+        return bridge("POST", "/login", {"cli": "codex"})
+
+    @r.get("/llm/providers/{pid}/login")
+    def llm_login_state(pid: str):
+        if provider_spec(pid).cli != "codex":
+            raise HTTPException(400, "Browser sign-in is only available for ChatGPT")
+        return bridge("GET", "/login/codex")
 
     # ------------------------------------------------------------ schema catalog
     @r.get("/catalog")
@@ -282,6 +429,7 @@ def build_router(settings: Settings) -> APIRouter:
     async def create_investigation(cid: str, request: Request, title: str = Form(""), raw_log: str = Form(""),
                                    context: str = Form(""), analyze_now: bool = Form(True),
                                    use_llm: bool = Form(False), confirm_external: bool = Form(False),
+                                   llm_provider: str = Form("", max_length=40),
                                    file: UploadFile | None = File(None)):
         prof = profile(cid)
         source = ""
@@ -304,7 +452,8 @@ def build_router(settings: Settings) -> APIRouter:
                      log_chars=len(raw_log), upload=bool(source))
         if analyze_now:
             from starlette.concurrency import run_in_threadpool
-            inv = await run_in_threadpool(run_analysis, request, prof, inv, use_llm, confirm_external)
+            inv = await run_in_threadpool(run_analysis, request, prof, inv, use_llm, confirm_external,
+                                         llm_provider)
         return inv
 
     @r.get("/customers/{cid}/investigations/{iid}")
@@ -328,7 +477,8 @@ def build_router(settings: Settings) -> APIRouter:
     @r.post("/customers/{cid}/investigations/{iid}/analyze")
     def reanalyze(cid: str, iid: str, body: AnalyzeIn, request: Request):
         prof = profile(cid)
-        return run_analysis(request, prof, get_inv(cid, iid), body.use_llm, body.confirm_external)
+        return run_analysis(request, prof, get_inv(cid, iid), body.use_llm, body.confirm_external,
+                            body.llm_provider)
 
     @r.post("/customers/{cid}/investigations/{iid}/ticket")
     def ticket(cid: str, iid: str, request: Request):

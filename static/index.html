@@ -13,6 +13,9 @@
     <select id="customerSelect"><option value="">Select customer…</option></select>
   </label>
   <div id="llmBadge" class="badge"></div>
+  <label id="extSwitch" class="switch hidden" title="Turn sending data to the external LLM on or off for everyone">
+    <input type="checkbox" id="extToggle"><span class="slider"></span> External LLM
+  </label>
   <div class="spacer"></div>
   <label class="analyst">Analyst <input id="analystName" maxlength="60" placeholder="your name"></label>
 </header>
@@ -24,6 +27,7 @@
       <button id="btnConfig" disabled>Customer config</button>
       <button id="btnNewCustomer" class="ghost">+ Customer</button>
       <button id="btnCatalog" class="ghost">Schema catalog</button>
+      <button id="btnLLM" class="ghost">LLM settings</button>
     </div>
     <div class="side-filter">
       <input id="invSearch" placeholder="Filter investigations">
